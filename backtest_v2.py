@@ -385,12 +385,15 @@ class PortfolioOptimiser:
         """
         Inverse-volatility weighting (closed-form approximation to risk parity).
             wᵢ ∝ 1 / σᵢ     where σᵢ = √Σᵢᵢ (annualised)
-        Weights are clipped to MAX_WEIGHT then renormalised.
+        Normalise first, THEN clip to MAX_WEIGHT and re-normalise.
+        (Clipping raw 1/σ values before normalisation is incorrect because
+        1/σ ~ 3–5 which always exceeds MAX_WEIGHT=0.30, collapsing RP to EW.)
         """
         ann_vol = np.sqrt(np.clip(np.diag(Sigma), 1e-8, None))
         w = 1.0 / ann_vol
-        w = np.clip(w, 0.0, self.cfg.MAX_WEIGHT)
-        w /= w.sum()
+        w /= w.sum()                              # normalise to sum = 1 first
+        w = np.clip(w, 0.0, self.cfg.MAX_WEIGHT)  # then apply per-asset cap
+        w /= w.sum()                              # re-normalise after clipping
         return w
 
 
@@ -458,10 +461,10 @@ class PerformanceCalculator:
         sharpe  = (ann_ret - rf_a) / ann_vol if ann_vol > 1e-8 else 0.0
 
         excess   = ret_series - rf_series
-        neg_exc  = excess[excess < 0]
-        down_std = (np.sqrt((neg_exc ** 2).mean()) * np.sqrt(12)
-                    if len(neg_exc) > 0 else 1e-8)
-        sortino  = (ann_ret - rf_a) / max(down_std, 1e-8)
+        # Average over ALL periods (standard Sortino denominator)
+        down_std = np.sqrt((excess.clip(upper=0) ** 2).mean()) * np.sqrt(12)
+        down_std = max(down_std, 1e-8)
+        sortino  = (ann_ret - rf_a) / down_std
 
         cum     = (1 + ret_series).cumprod()
         roll_mx = cum.expanding().max()
