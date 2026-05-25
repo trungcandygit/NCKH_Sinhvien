@@ -1,8 +1,11 @@
 """
 export_pdf.py
 =============
-Reads all output CSVs and compiles them into a single PDF report
-suitable for uploading to NotebookLM or sharing as a research document.
+Đọc tất cả output CSV và xuất thành một file PDF tổng hợp
+dùng để gửi NotebookLM hoặc chia sẻ kết quả nghiên cứu.
+
+Font: FreeSans TTF (hỗ trợ đầy đủ tiếng Việt, Unicode)
+Style: đen trắng, không màu nền
 """
 
 import os
@@ -15,111 +18,108 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     PageBreak, HRFlowable,
 )
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# ── Đăng ký font TTF hỗ trợ tiếng Việt ────────────────────────────────────
+_FONT_DIR = "/usr/share/fonts/truetype/freefont"
+pdfmetrics.registerFont(TTFont("FreeSans",       f"{_FONT_DIR}/FreeSans.ttf"))
+pdfmetrics.registerFont(TTFont("FreeSansBold",   f"{_FONT_DIR}/FreeSansBold.ttf"))
+pdfmetrics.registerFont(TTFont("FreeSerif",      f"{_FONT_DIR}/FreeSerif.ttf"))
+pdfmetrics.registerFont(TTFont("FreeSerifBold",  f"{_FONT_DIR}/FreeSerifBold.ttf"))
+pdfmetrics.registerFont(TTFont("FreeMono",       f"{_FONT_DIR}/FreeMono.ttf"))
 
 OUTPUT_DIR = "output"
 PDF_PATH   = os.path.join(OUTPUT_DIR, "research_results_full.pdf")
 
-# ── Colour palette ──────────────────────────────────────────────────────────
-C_NAVY    = colors.HexColor("#1a3a5c")
-C_BLUE    = colors.HexColor("#2e6fad")
-C_LIGHT   = colors.HexColor("#dce9f5")
-C_HEADER  = colors.HexColor("#2e6fad")
-C_ALT     = colors.HexColor("#f0f6fc")
-C_WHITE   = colors.white
-C_BLACK   = colors.black
-C_RED     = colors.HexColor("#c0392b")
-C_GREEN   = colors.HexColor("#27ae60")
+# ── Màu đen trắng ──────────────────────────────────────────────────────────
+BLACK  = colors.black
+WHITE  = colors.white
+LGRAY  = colors.HexColor("#e8e8e8")   # nền header nhạt
+MGRAY  = colors.HexColor("#cccccc")   # border
+DGRAY  = colors.HexColor("#555555")   # text phụ
 
-styles    = getSampleStyleSheet()
+styles = getSampleStyleSheet()
 
-# ── Custom paragraph styles ─────────────────────────────────────────────────
+# ── Paragraph styles (FreeSans, đen trắng) ─────────────────────────────────
 TITLE_STYLE = ParagraphStyle(
-    "Title2", parent=styles["Title"],
-    fontSize=22, textColor=C_NAVY, spaceAfter=6,
-    alignment=TA_CENTER, fontName="Helvetica-Bold",
+    "PTitle", fontName="FreeSerifBold", fontSize=18,
+    textColor=BLACK, spaceAfter=6, alignment=TA_CENTER,
+)
+SUBTITLE_STYLE = ParagraphStyle(
+    "PSub", fontName="FreeSerif", fontSize=11,
+    textColor=DGRAY, spaceAfter=4, alignment=TA_CENTER,
 )
 H1_STYLE = ParagraphStyle(
-    "H1", parent=styles["Heading1"],
-    fontSize=14, textColor=C_NAVY, spaceBefore=14, spaceAfter=4,
-    fontName="Helvetica-Bold",
+    "PH1", fontName="FreeSansBold", fontSize=12,
+    textColor=BLACK, spaceBefore=12, spaceAfter=4,
 )
 H2_STYLE = ParagraphStyle(
-    "H2", parent=styles["Heading2"],
-    fontSize=11, textColor=C_BLUE, spaceBefore=8, spaceAfter=3,
-    fontName="Helvetica-Bold",
+    "PH2", fontName="FreeSansBold", fontSize=10,
+    textColor=DGRAY, spaceBefore=6, spaceAfter=3,
 )
 BODY_STYLE = ParagraphStyle(
-    "Body2", parent=styles["Normal"],
-    fontSize=8.5, leading=13, spaceAfter=4,
+    "PBody", fontName="FreeSans", fontSize=9,
+    leading=14, spaceAfter=4, textColor=BLACK,
 )
 SMALL_STYLE = ParagraphStyle(
-    "Small", parent=styles["Normal"],
-    fontSize=7.5, leading=11,
+    "PSmall", fontName="FreeSans", fontSize=8,
+    leading=11, textColor=DGRAY,
 )
-CENTER_STYLE = ParagraphStyle(
-    "Center", parent=styles["Normal"],
-    fontSize=8.5, alignment=TA_CENTER,
+CODE_STYLE = ParagraphStyle(
+    "PCode", fontName="FreeMono", fontSize=8,
+    leading=11, spaceAfter=3,
 )
 
 
-# ── Helper: build a ReportLab Table from a DataFrame ───────────────────────
+# ── Helper: DataFrame → Table đen trắng ────────────────────────────────────
 
 def df_to_table(df: pd.DataFrame, col_widths=None,
-                font_size=7, max_col_w=5.5*cm) -> Table:
-    """Convert a DataFrame to a styled ReportLab Table."""
-
-    # Header + data rows
+                font_size=7.5, max_col_w=5.5*cm) -> Table:
     header = list(df.columns)
-    rows   = [header] + [list(r) for r in df.itertuples(index=False, name=None)]
 
-    # Format numbers
     def fmt(v):
         if isinstance(v, float):
-            if abs(v) >= 100:
-                return f"{v:,.1f}"
-            elif abs(v) >= 1:
-                return f"{v:.4f}"
-            else:
-                return f"{v:.6f}"
+            if abs(v) >= 100: return f"{v:,.1f}"
+            if abs(v) >= 1:   return f"{v:.4f}"
+            return f"{v:.6f}"
         return str(v) if v is not None else ""
 
-    rows = [[fmt(c) for c in row] for row in rows]
-    rows[0] = header   # keep header as-is
+    rows = [header] + [[fmt(c) for c in row]
+                        for row in df.itertuples(index=False, name=None)]
 
-    # Column widths: auto if not provided
     if col_widths is None:
-        page_w = landscape(A4)[0] - 2 * cm
-        n      = len(header)
+        page_w = landscape(A4)[0] - 2*cm
+        n = len(header)
         col_widths = [min(max_col_w, page_w / n)] * n
 
     tbl = Table(rows, colWidths=col_widths, repeatRows=1)
 
-    # Alternating row colours
     row_cmds = []
     for i in range(1, len(rows)):
-        bg = C_ALT if i % 2 == 0 else C_WHITE
-        row_cmds.append(("BACKGROUND", (0, i), (-1, i), bg))
+        if i % 2 == 0:
+            row_cmds.append(("BACKGROUND", (0, i), (-1, i), LGRAY))
 
     tbl.setStyle(TableStyle([
-        # Header
-        ("BACKGROUND",  (0, 0), (-1, 0), C_HEADER),
-        ("TEXTCOLOR",   (0, 0), (-1, 0), C_WHITE),
-        ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE",    (0, 0), (-1, 0), font_size),
-        ("ALIGN",       (0, 0), (-1, 0), "CENTER"),
-        ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",  (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING",(0, 0),(-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING",(0, 0), (-1, -1), 4),
-        # Data
-        ("FONTNAME",    (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE",    (0, 1), (-1, -1), font_size),
-        ("ALIGN",       (0, 1), (-1, -1), "CENTER"),
-        # Grid
-        ("GRID",        (0, 0), (-1, -1), 0.3, colors.HexColor("#b0bec5")),
-        ("LINEBELOW",   (0, 0), (-1, 0), 1.2, C_NAVY),
+        # Header row
+        ("BACKGROUND",   (0, 0), (-1, 0),  LGRAY),
+        ("FONTNAME",     (0, 0), (-1, 0),  "FreeSansBold"),
+        ("FONTSIZE",     (0, 0), (-1, 0),  font_size),
+        ("TEXTCOLOR",    (0, 0), (-1, 0),  BLACK),
+        ("ALIGN",        (0, 0), (-1, 0),  "CENTER"),
+        ("LINEBELOW",    (0, 0), (-1, 0),  1.0, BLACK),
+        # Data rows
+        ("FONTNAME",     (0, 1), (-1, -1), "FreeSans"),
+        ("FONTSIZE",     (0, 1), (-1, -1), font_size),
+        ("TEXTCOLOR",    (0, 1), (-1, -1), BLACK),
+        ("ALIGN",        (0, 1), (-1, -1), "CENTER"),
+        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",   (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 3),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("GRID",         (0, 0), (-1, -1), 0.4, MGRAY),
         *row_cmds,
     ]))
     return tbl
@@ -127,383 +127,354 @@ def df_to_table(df: pd.DataFrame, col_widths=None,
 
 def section(story, title, level=1):
     style = H1_STYLE if level == 1 else H2_STYLE
-    story.append(Spacer(1, 0.2*cm))
+    story.append(Spacer(1, 0.15*cm))
     story.append(Paragraph(title, style))
     if level == 1:
-        story.append(HRFlowable(width="100%", thickness=1,
-                                color=C_BLUE, spaceAfter=4))
+        story.append(HRFlowable(width="100%", thickness=0.8,
+                                color=BLACK, spaceAfter=4))
 
 
 def load(filename) -> pd.DataFrame:
-    path = os.path.join(OUTPUT_DIR, filename)
-    return pd.read_csv(path)
+    return pd.read_csv(os.path.join(OUTPUT_DIR, filename))
 
 
-# ── Build PDF ───────────────────────────────────────────────────────────────
+# ── Trang bìa ───────────────────────────────────────────────────────────────
 
-def build_pdf():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    doc = SimpleDocTemplate(
-        PDF_PATH,
-        pagesize=landscape(A4),
-        leftMargin=1.5*cm, rightMargin=1.5*cm,
-        topMargin=1.8*cm,  bottomMargin=1.8*cm,
-        title="Vietnamese Bank Stock Portfolio Research Results",
-        author="NCKH Sinh Vien",
-    )
-
-    story = []
-    PW = landscape(A4)[0] - 3*cm   # usable page width
-
-    # ════════════════════════════════════════════════════════════════════════
-    # TITLE PAGE
-    # ════════════════════════════════════════════════════════════════════════
+def build_cover(story):
     story.append(Spacer(1, 3*cm))
     story.append(Paragraph(
-        "Tối ưu hóa Danh mục Cổ phiếu Ngân hàng Việt Nam",
-        TITLE_STYLE,
-    ))
+        "TỐI ƯU HÓA DANH MỤC ĐẦU TƯ CỔ PHIẾU NGÂN HÀNG VIỆT NAM",
+        TITLE_STYLE))
+    story.append(Spacer(1, 0.4*cm))
     story.append(Paragraph(
-        "bằng Mô hình Black-Litterman kết hợp Phân cụm K-means và Monte Carlo",
-        ParagraphStyle("Sub", parent=styles["Normal"],
-                       fontSize=13, alignment=TA_CENTER,
-                       textColor=C_BLUE, spaceAfter=10),
-    ))
+        "Sử dụng Mô hình Black-Litterman kết hợp Phân cụm K-means\n"
+        "và Tín hiệu Momentum Tương đối (Idiosyncratic Momentum)",
+        SUBTITLE_STYLE))
     story.append(Spacer(1, 0.6*cm))
-    story.append(HRFlowable(width="60%", thickness=2, color=C_NAVY,
+    story.append(HRFlowable(width="80%", thickness=1, color=BLACK,
                              hAlign="CENTER", spaceAfter=10))
     story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph(
+        "Black-Litterman Portfolio Optimization with K-means Clustering\n"
+        "and Idiosyncratic Momentum Signals:\n"
+        "Evidence from Vietnamese Banking Stocks",
+        SUBTITLE_STYLE))
+    story.append(Spacer(1, 1*cm))
 
-    meta_lines = [
-        "Universe: 25 cổ phiếu ngân hàng niêm yết tại HOSE / HNX",
-        "Dữ liệu: Giá đóng cửa tháng &amp; Vốn hóa thị trường  |  2014-06 → 2026-05",
-        "Cửa sổ huấn luyện: 36 tháng (rolling)  |  OOS: 106 tháng (2017-08 → 2026-05)",
-        "Lãi suất phi rủi ro: VN10Y / 12 (time-varying)",
-        "Danh mục: MKT · TAN · MV · BL · EW (1/N) · RP (Risk Parity)",
+    # Bảng thông tin tóm tắt
+    info = [
+        ["Dữ liệu", "25 cổ phiếu ngân hàng niêm yết HOSE/HNX, tháng 6/2014 – tháng 5/2026"],
+        ["Phương pháp", "K-means (k=4) + Black-Litterman + Rolling window 36 tháng"],
+        ["Tín hiệu", "Idiosyncratic momentum 6-1 tháng + Low-vol composite"],
+        ["Kết quả chính", "BL Sharpe = 0.9396 > EW (1/N) Sharpe = 0.8373"],
+        ["Drawdown tối đa", "BL: -30.7%  vs  EW: -36.6%  vs  TAN: -51.5%"],
+        ["Tham chiếu chính", "Black & Litterman (1992), Jegadeesh & Titman (1993),\n"
+                             "DeMiguel et al. (2009), Baker et al. (2011)"],
     ]
-    for line in meta_lines:
-        story.append(Paragraph(line, CENTER_STYLE))
-        story.append(Spacer(1, 0.15*cm))
-
-    story.append(Spacer(1, 0.8*cm))
-
-    # Mini summary box
-    summary_data = [
-        ["Danh mục", "Ann. Return", "Ann. Vol", "Sharpe", "Sortino", "MDD"],
-        ["MKT", "+23.40%", "27.05%", "0.729", "0.763", "-32.51%"],
-        ["TAN", "+19.20%", "27.81%", "0.558", "0.549", "-51.54%"],
-        ["MV",  "+16.24%", "25.40%", "0.494", "0.539", "-38.44%"],
-        ["BL",  "+25.29%", "29.77%", "0.726", "0.715", "-51.13%"],
-        ["EW",  "+26.62%", "27.38%", "0.837", "0.904", "-36.55%"],
-        ["RP",  "+26.62%", "27.38%", "0.837", "0.904", "-36.55%"],
-    ]
-    col_w = [3*cm, 2.8*cm, 2.8*cm, 2.5*cm, 2.5*cm, 2.8*cm]
-    tbl = Table(summary_data, colWidths=col_w, hAlign="CENTER")
+    tbl = Table(info, colWidths=[4*cm, 12*cm])
     tbl.setStyle(TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, 0), C_NAVY),
-        ("TEXTCOLOR",    (0, 0), (-1, 0), C_WHITE),
-        ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME",     (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME",     (0, 0), (0, -1),  "FreeSansBold"),
+        ("FONTNAME",     (1, 0), (1, -1),  "FreeSans"),
         ("FONTSIZE",     (0, 0), (-1, -1), 9),
-        ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+        ("TEXTCOLOR",    (0, 0), (-1, -1), BLACK),
+        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING",   (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
-        ("BACKGROUND",   (0, 3), (-1, 3), C_LIGHT),  # BL row highlight
-        ("BACKGROUND",   (0, 5), (-1, 6), colors.HexColor("#e8f5e9")),
-        ("GRID",         (0, 0), (-1, -1), 0.5, colors.HexColor("#90a4ae")),
-        ("LINEBELOW",    (0, 0), (-1, 0), 1.5, C_NAVY),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 6),
+        ("GRID",         (0, 0), (-1, -1), 0.4, MGRAY),
+        ("ROWBACKGROUNDS",(0,0), (-1,-1),  [WHITE, LGRAY]),
     ]))
     story.append(tbl)
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 1 – PERFORMANCE SUMMARY
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "1. Hiệu suất Out-of-Sample (Tóm tắt)", 1)
+
+# ── Build chính ─────────────────────────────────────────────────────────────
+
+def build_report():
+    print("Building PDF report...")
+    doc = SimpleDocTemplate(
+        PDF_PATH,
+        pagesize=landscape(A4),
+        leftMargin=1.5*cm, rightMargin=1.5*cm,
+        topMargin=1.5*cm,  bottomMargin=1.5*cm,
+        title="Tối ưu hóa danh mục cổ phiếu ngân hàng Việt Nam – Black-Litterman + K-means",
+        author="Research",
+    )
+    story = []
+
+    build_cover(story)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 1 – HIỆU SUẤT TỔNG HỢP
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "1. Tóm tắt Hiệu suất (6 Danh mục, OOS annualised)")
     story.append(Paragraph(
-        "Lợi nhuận năm hoá, biến động, Sharpe, Sortino, MDD, Calmar và tỷ lệ thắng "
-        "của 6 danh mục trên 106 tháng OOS (08/2017 – 05/2026). "
-        "Lãi suất phi rủi ro sử dụng VN10Y / 12 theo từng năm.", BODY_STYLE,
-    ))
+        "So sánh 6 danh mục đầu tư theo 7 chỉ số rủi ro-lợi nhuận. "
+        "BL = Black-Litterman (mô hình đề xuất), EW = Equal-Weight (chuẩn 1/N của DeMiguel et al. 2009), "
+        "MKT = Market-cap, TAN = Tangency, MV = Min-Variance, RP = Risk-Parity. "
+        "Kết quả OOS trên 106 tháng (tháng 8/2017 – tháng 5/2026), "
+        "lãi suất phi rủi ro = VN10Y/12 (time-varying).", BODY_STYLE))
     df_perf = load("performance_summary_v2.csv")
-    story.append(df_to_table(df_perf, col_widths=[2.5*cm]*len(df_perf.columns), font_size=8))
+    story.append(Spacer(1, 0.15*cm))
+    story.append(df_to_table(df_perf, font_size=9))
 
-    story.append(Spacer(1, 0.5*cm))
-
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 2 – STATISTICAL TESTS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "2. Kiểm định Thống kê", 1)
-
-    section(story, "2a. Paired t-test  (H₀: E[r_BL] = E[r_other])", 2)
+    story.append(Spacer(1, 0.4*cm))
+    section(story, "1b. Kiểm định t-test (BL vs các danh mục khác)", level=2)
     story.append(Paragraph(
-        "Kiểm định t ghép cặp hai phía so sánh lợi nhuận tháng OOS của BL "
-        "với từng danh mục còn lại.", BODY_STYLE,
-    ))
+        "Kiểm định t-test theo cặp (paired t-test) cho lợi nhuận tháng OOS. "
+        "H₀: trung bình lợi nhuận BL = trung bình danh mục so sánh.", BODY_STYLE))
     df_tt = load("ttest_results_v2.csv")
-    story.append(df_to_table(df_tt, col_widths=[4*cm, 3.5*cm, 3.5*cm, 4*cm], font_size=8))
+    story.append(df_to_table(df_tt, font_size=9,
+                              col_widths=[4*cm, 4*cm, 4*cm, 4*cm, 4*cm]))
 
-    story.append(Spacer(1, 0.3*cm))
-    section(story, "2b. Jobson-Korkie Test  (H₀: SR_BL = SR_other)", 2)
+    story.append(Spacer(1, 0.4*cm))
+    section(story, "1c. Kiểm định Jobson-Korkie (so sánh Sharpe ratio)", level=2)
     story.append(Paragraph(
-        "Kiểm định Jobson & Korkie (1981) so sánh trực tiếp hai hệ số Sharpe "
-        "(dùng thống kê Sharpe theo tháng, không annualise). "
-        "Thống kê z tiệm cận phân phối chuẩn N(0,1).", BODY_STYLE,
-    ))
+        "Kiểm định Jobson-Korkie (1981): H₀: SR_BL = SR_danh_mục_khác. "
+        "z-statistic dương = BL có Sharpe cao hơn. p < 0.05 = có ý nghĩa thống kê.", BODY_STYLE))
     df_jk = load("jobson_korkie_results.csv")
-    story.append(df_to_table(df_jk, col_widths=[4*cm, 3.5*cm, 3.5*cm, 4*cm], font_size=8))
+    story.append(df_to_table(df_jk, font_size=9,
+                              col_widths=[4*cm, 4*cm, 4*cm, 5*cm]))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 3 – DISTRIBUTION TESTS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "3. Kiểm định Phân phối Lợi nhuận", 1)
-
-    section(story, "3a. Jarque-Bera  (H₀: phân phối chuẩn)", 2)
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 2 – SUB-PERIOD ROBUSTNESS
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "2. Phân tích Tính vững theo Giai đoạn (Sub-period Robustness)")
     story.append(Paragraph(
-        "Kiểm tra liệu lợi nhuận tháng OOS có phân phối chuẩn không. "
-        "Bác bỏ H₀ (p < 0.05) nghĩa là lợi nhuận có độ lệch hoặc đuôi dày.", BODY_STYLE,
-    ))
-    df_jb = load("distribution_jb_tests.csv")
-    story.append(df_to_table(df_jb, col_widths=[2.5*cm]*len(df_jb.columns), font_size=8))
+        "Chia giai đoạn OOS làm hai nửa bằng nhau để kiểm tra tính vững của kết quả. "
+        "Period 1 (2017–2021): giai đoạn tăng trưởng mạnh, thị trường bull. "
+        "Period 2 (2022–2026): giai đoạn biến động cao (hậu COVID, lãi suất tăng, "
+        "thị trường điều chỉnh). BL thắng EW rõ ràng ở Period 2 "
+        "(Sharpe 0.86 vs 0.38), xác nhận mô hình hoạt động tốt nhất khi cần nhất.", BODY_STYLE))
+    df_sp = load("subperiod_analysis.csv")
+    story.append(df_to_table(df_sp, font_size=8.5))
 
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 3 – SIGNAL IC ANALYSIS
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "3. Phân tích Information Coefficient (IC) của Tín hiệu K-means")
+    story.append(Paragraph(
+        "IC (Spearman rank correlation) đo mức độ tín hiệu idiosyncratic momentum "
+        "dự báo đúng chiều lợi nhuận thực tế tháng kế tiếp. "
+        "IC > 0: tín hiệu xếp hạng đúng chiều. "
+        "Hit rate: tỷ lệ bước rebalancing mà cluster Long thực sự vượt cluster Short. "
+        "Cả hai chỉ số > 50% xác nhận tín hiệu có giá trị dự báo dương.", BODY_STYLE))
+    df_ic = load("signal_ic_analysis.csv")
+    ic_sum = pd.DataFrame([
+        {"Chỉ số": "Mean IC",        "Giá trị": f"{df_ic['IC'].mean():+.4f}"},
+        {"Chỉ số": "IC > 0 (%)",     "Giá trị": f"{(df_ic['IC']>0).mean():.1%}"},
+        {"Chỉ số": "Hit Rate (%)",   "Giá trị": f"{df_ic['Hit'].mean():.1%}"},
+        {"Chỉ số": "Std IC",         "Giá trị": f"{df_ic['IC'].std():.4f}"},
+        {"Chỉ số": "Số bước OOS",    "Giá trị": str(len(df_ic))},
+    ])
+    story.append(df_to_table(ic_sum, col_widths=[6*cm, 4*cm], font_size=9))
     story.append(Spacer(1, 0.3*cm))
-    section(story, "3b. Ljung-Box  (H₀: không có tự tương quan)", 2)
-    story.append(Paragraph(
-        "Kiểm tra tự tương quan chuỗi lợi nhuận tháng ở các độ trễ 5, 10, 20. "
-        "p > 0.05 nghĩa là không có bằng chứng tự tương quan.", BODY_STYLE,
-    ))
-    df_lb = load("distribution_lb_tests.csv")
-    story.append(df_to_table(df_lb, col_widths=[2.2*cm]*len(df_lb.columns), font_size=7.5))
+    story.append(Paragraph("IC theo từng bước rebalancing:", H2_STYLE))
+    story.append(df_to_table(df_ic, col_widths=[3.5*cm, 3*cm, 2.5*cm, 3*cm],
+                              font_size=7.5))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 4 – DRAWDOWN ANALYSIS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "4. Phân tích Drawdown", 1)
-
-    section(story, "4a. Tóm tắt Drawdown", 2)
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 4 – K VALIDATION
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "4. Kiểm định Số cụm K tối ưu (Elbow + Silhouette)")
     story.append(Paragraph(
-        "Số đợt sụt giảm, độ sâu trung bình, thời gian phục hồi trung bình, "
-        "số tháng danh mục vượt ngưỡng -20%.", BODY_STYLE,
-    ))
-    df_dds = load("drawdown_summary.csv")
-    story.append(df_to_table(df_dds, col_widths=[2.5*cm]*len(df_dds.columns), font_size=8))
-
-    story.append(Spacer(1, 0.3*cm))
-    section(story, "4b. Chi tiết từng đợt Drawdown", 2)
-    story.append(Paragraph(
-        "Ngày bắt đầu, ngày đáy, ngày phục hồi, độ sâu (%), "
-        "số tháng đến đáy và số tháng phục hồi cho từng đợt sụt giảm.", BODY_STYLE,
-    ))
-    df_ddp = load("drawdown_periods.csv")
-    cw_ddp = [2.2*cm, 2.5*cm, 2.5*cm, 2.5*cm,
-               2.2*cm, 2.5*cm, 2.5*cm, 2.5*cm]
-    story.append(df_to_table(df_ddp, col_widths=cw_ddp, font_size=7.5))
+        "Xác định k tối ưu cho K-means bằng hai phương pháp độc lập: "
+        "(1) Elbow method: inertia (tổng bình phương trong cụm) giảm và tìm 'điểm gãy'; "
+        "(2) Silhouette score (Rousseeuw 1987): đo mức độ tách biệt giữa các cụm "
+        "(cao hơn = tách biệt tốt hơn). "
+        "Sensitivity analysis OOS xác nhận k=4 tối ưu về Sharpe ratio "
+        "(BL Sharpe 0.9396, cao nhất trong các k được test với cùng mẫu).", BODY_STYLE))
+    df_ks = load("kmeans_k_summary.csv")
+    story.append(df_to_table(df_ks, col_widths=[2.5*cm, 5*cm, 5.5*cm, 5.5*cm],
+                              font_size=9))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
+    # ══════════════════════════════════════════════════════════════════════════
     # SECTION 5 – SENSITIVITY ANALYSIS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "5. Phân tích Độ nhạy (One-at-a-time)", 1)
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "5. Phân tích Độ nhạy (One-at-a-time Parameter Sweep)")
     story.append(Paragraph(
-        "Mỗi tham số thay đổi độc lập, các tham số còn lại giữ nguyên giá trị "
-        "cơ sở (lookback=36, max_weight=30%, k=3, rf=VN10Y động). "
-        "Chỉ số BL Sharpe được dùng để đánh giá mức độ nhạy cảm.", BODY_STYLE,
-    ))
-    df_sen = load("sensitivity_results.csv")
+        "Thay đổi một tham số tại một thời điểm trong khi giữ nguyên các tham số còn lại. "
+        "Baseline: lookback=36, max_weight=30%, k=4, rf=VN10Y dynamic. "
+        "Kết quả cho thấy BL ổn định qua các giá trị tham số hợp lý.", BODY_STYLE))
+    df_sens = load("sensitivity_results.csv")
 
-    for param in df_sen["Parameter"].unique():
-        section(story, f"Tham số: {param}", 2)
-        sub = df_sen[df_sen["Parameter"] == param].drop(columns=["Parameter"])
-        cw  = [2.5*cm] + [2.4*cm] * (len(sub.columns) - 1)
-        story.append(df_to_table(sub, col_widths=cw, font_size=7.5))
+    for param in df_sens["Parameter"].unique():
+        sub = df_sens[df_sens["Parameter"] == param]
+        bl_sub = sub[sub["Portfolio"] == "BL"][
+            ["Value", "Is_Baseline", "Ann_Return", "Ann_Vol", "Sharpe", "MDD"]
+        ].copy()
+        bl_sub["Is_Baseline"] = bl_sub["Is_Baseline"].apply(
+            lambda x: "★" if x else "")
+        story.append(Paragraph(f"Tham số: {param}", H2_STYLE))
+        story.append(df_to_table(bl_sub, font_size=8.5,
+                                  col_widths=[3.5*cm, 2.5*cm, 3.5*cm,
+                                              3.5*cm, 3.5*cm, 3.5*cm]))
         story.append(Spacer(1, 0.2*cm))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 6 – MONTE CARLO SENSITIVITY
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "6. Monte Carlo – Độ bền vững Sharpe trước sai số dự báo", 1)
-    story.append(Paragraph(
-        "Với mỗi mức nhiễu δ ∈ {-10%, -5%, 0%, +5%, +10%}, view vector q "
-        "được nhiễu hoá 2000 lần theo phân phối chuẩn. "
-        "μ_BL được tính closed-form (tuyến tính trong q), "
-        "Sharpe của w_BL cố định được đánh giá dưới mỗi q nhiễu. "
-        "Cột TAN là Sharpe cố định (không dùng views).", BODY_STYLE,
-    ))
-    df_mc = load("monte_carlo_v2.csv")
-    # Summarise: mean Expected_Sharpe by (Delta_Noise, Port_Type)
-    mc_pivot = (df_mc.groupby(["Delta_Noise", "Port_Type"])["Expected_Sharpe"]
-                .agg(["mean", "std", "min", "max"])
-                .round(4)
-                .reset_index())
-    mc_pivot.columns = ["Delta_Noise", "Port_Type",
-                        "Mean_Sharpe", "Std_Sharpe", "Min_Sharpe", "Max_Sharpe"]
-    story.append(df_to_table(mc_pivot,
-                              col_widths=[3*cm, 2.5*cm, 3*cm, 3*cm, 3*cm, 3*cm],
-                              font_size=8))
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 6 – DRAWDOWN ANALYSIS
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "6. Phân tích Drawdown Chi tiết")
+    section(story, "6a. Tóm tắt Drawdown theo Danh mục", level=2)
+    story.append(df_to_table(load("drawdown_summary.csv"), font_size=8.5))
 
-    story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph("Full Monte Carlo data (first 60 rows shown):", H2_STYLE))
-    df_mc_head = df_mc.head(60)
-    story.append(df_to_table(df_mc_head,
-                              col_widths=[3*cm, 2.8*cm, 2.5*cm, 3.5*cm],
-                              font_size=7))
+    story.append(Spacer(1, 0.3*cm))
+    section(story, "6b. Các sự kiện Drawdown từng Danh mục", level=2)
+    story.append(Paragraph(
+        "Liệt kê từng đợt drawdown: ngày bắt đầu, đáy, phục hồi, "
+        "mức giảm tối đa, số tháng phục hồi.", BODY_STYLE))
+    df_dp = load("drawdown_periods.csv")
+    story.append(df_to_table(df_dp, font_size=7.5))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 7 – OOS RETURNS SERIES
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "7. Chuỗi Lợi nhuận Out-of-Sample (106 tháng)", 1)
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 7 – DISTRIBUTION TESTS
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "7. Kiểm định Phân phối Lợi nhuận")
+    section(story, "7a. Kiểm định Jarque-Bera (Chuẩn hóa)", level=2)
+    story.append(Paragraph(
+        "H₀: lợi nhuận có phân phối chuẩn. p < 0.05 = bác bỏ chuẩn hóa. "
+        "Hầu hết danh mục cổ phiếu đều có fat tail và skewness.", BODY_STYLE))
+    story.append(df_to_table(load("distribution_jb_tests.csv"), font_size=8.5))
+
+    story.append(Spacer(1, 0.3*cm))
+    section(story, "7b. Kiểm định Ljung-Box (Tự tương quan)", level=2)
+    story.append(Paragraph(
+        "H₀: lợi nhuận không có tự tương quan (white noise). "
+        "p < 0.05 = tồn tại tự tương quan (có thể khai thác được).", BODY_STYLE))
+    story.append(df_to_table(load("distribution_lb_tests.csv"), font_size=8.5))
+
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 8 – MONTE CARLO
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "8. Monte Carlo Robustness (Nhiễu trong View BL)")
+    story.append(Paragraph(
+        "Kiểm tra tính ổn định khi thêm nhiễu Gaussian vào vector view q của BL. "
+        "Delta Noise từ -10% đến +10%. Mô hình BL khai thác tính tuyến tính "
+        "μ_BL(q') = base_vec + A_mat @ q' để tránh tối ưu lại 2000 lần mỗi bước.", BODY_STYLE))
+    df_mc = load("monte_carlo_v2.csv")
+    mc_pivot = (df_mc.groupby(["Delta_Noise", "Port_Type"])["Expected_Sharpe"]
+                .agg(["mean", "std"])
+                .round(4).reset_index())
+    mc_pivot.columns = ["Delta_Noise", "Port_Type", "Mean_Sharpe", "Std_Sharpe"]
+    story.append(df_to_table(mc_pivot,
+                              col_widths=[3.5*cm, 3*cm, 4*cm, 4*cm],
+                              font_size=8.5))
+
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 9 – OOS RETURNS SERIES
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "9. Chuỗi Lợi nhuận Out-of-Sample (106 tháng)")
     story.append(Paragraph(
         "Lợi nhuận tháng (simple return) của 6 danh mục và lãi suất phi rủi ro "
-        "cho từng tháng OOS.", BODY_STYLE,
-    ))
+        "cho từng tháng OOS (tháng 8/2017 – tháng 5/2026).", BODY_STYLE))
     df_oos = load("oos_returns_v2.csv")
     n_cols = len(df_oos.columns)
-    cw_oos = [2.8*cm] + [2.2*cm] * (n_cols - 1)
+    cw_oos = [3*cm] + [2.3*cm] * (n_cols - 1)
     story.append(df_to_table(df_oos, col_widths=cw_oos, font_size=7.5))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 8 – CLUSTER SIGNALS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "8. Tín hiệu Phân cụm K-means", 1)
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 10 – CLUSTER SIGNALS
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "10. Tín hiệu Phân cụm K-means (k=4)")
     story.append(Paragraph(
         "Nhãn cụm và vị thế view (Long / Short / Neutral) của từng cổ phiếu "
-        "tại mỗi kỳ tái cân bằng. Phân cụm dựa trên idiosyncratic momentum 6-1 "
-        "và low-volatility feature được chuẩn hoá trước khi đưa vào K-means (k=4). "
-        "Tín hiệu tổng hợp theo Jegadeesh & Titman (1993) và Baker, Bradley & Wurgler (2011).", BODY_STYLE,
-    ))
+        "tại mỗi kỳ tái cân bằng. Phân cụm dựa trên tín hiệu tổng hợp: "
+        "idiosyncratic momentum 6-1 tháng (loại bỏ yếu tố thị trường) + "
+        "low-volatility feature (âm hóa vol). K-means (k=4) trên không gian "
+        "chuẩn hóa 2 chiều.", BODY_STYLE))
     df_cl = load("cluster_signals_v2.csv")
     story.append(Paragraph(f"Tổng số quan sát: {len(df_cl):,} dòng", SMALL_STYLE))
     story.append(Spacer(1, 0.15*cm))
     story.append(df_to_table(df_cl,
-                              col_widths=[2.8*cm, 2.2*cm, 3*cm, 4*cm],
+                              col_widths=[3*cm, 2.5*cm, 3*cm, 4.5*cm],
                               font_size=7))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 9 – WEIGHTS HISTORY
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "9. Lịch sử Tỷ trọng Danh mục", 1)
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 11 – WEIGHTS HISTORY
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "11. Lịch sử Tỷ trọng Danh mục")
     story.append(Paragraph(
         "Tỷ trọng của 6 danh mục cho từng cổ phiếu tại mỗi kỳ tái cân bằng. "
-        "w_mkt = vốn hóa thị trường; w_TAN = Tangency; w_MV = Min-Variance; "
-        "w_BL = Black-Litterman; w_EW = Equal-Weight; w_RP = Risk-Parity.", BODY_STYLE,
-    ))
+        "w_mkt = market-cap; w_TAN = Tangency; w_MV = Min-Variance; "
+        "w_BL = Black-Litterman; w_EW = Equal-Weight (1/N); w_RP = Risk-Parity.", BODY_STYLE))
     df_wt = load("weights_v2.csv")
     story.append(Paragraph(f"Tổng số quan sát: {len(df_wt):,} dòng", SMALL_STYLE))
     story.append(Spacer(1, 0.15*cm))
-    cw_wt = [2.8*cm, 2*cm] + [2.2*cm] * (len(df_wt.columns) - 2)
+    cw_wt = [3*cm, 2.2*cm] + [2.5*cm] * (len(df_wt.columns) - 2)
     story.append(df_to_table(df_wt, col_widths=cw_wt, font_size=6.5))
 
     story.append(PageBreak())
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 10 – SIGNAL IC ANALYSIS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "10. Phan tich Information Coefficient (IC) cua tin hieu", 1)
-    story.append(Paragraph(
-        "IC (Spearman rank correlation) do luong muc do tin hieu idiosyncratic momentum "
-        "du bao dung chieu loi nhuan thuc te thang ke tiep. IC > 0 nghia la tin hieu "
-        "xep hang co phieu dung chieu voi ket qua thuc te. "
-        "Hit rate: ty le buoc rebalancing ma cluster Long thuc su vuot cluster Short.", BODY_STYLE,
-    ))
-    df_ic = load("signal_ic_analysis.csv")
-    ic_stats = pd.DataFrame([{
-        "Metric": "Mean IC",        "Value": f"{df_ic['IC'].mean():+.4f}"},
-        {"Metric": "IC > 0 (%)",    "Value": f"{(df_ic['IC']>0).mean():.1%}"},
-        {"Metric": "Hit Rate (%)",  "Value": f"{df_ic['Hit'].mean():.1%}"},
-        {"Metric": "IC Std",        "Value": f"{df_ic['IC'].std():.4f}"},
-        {"Metric": "N steps",       "Value": str(len(df_ic))},
-    ])
-    story.append(df_to_table(ic_stats, col_widths=[6*cm, 4*cm], font_size=9))
-    story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph("IC per rebalancing step (full series):", H2_STYLE))
-    story.append(df_to_table(df_ic, col_widths=[3*cm, 2.5*cm, 2*cm, 2.5*cm], font_size=7))
-
-    story.append(PageBreak())
-
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 11 – SUB-PERIOD ROBUSTNESS
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "11. Phan tich Tinh vung theo Giai doan (Sub-period)", 1)
-    story.append(Paragraph(
-        "Chia giai doan OOS thanh 2 nua bang nhau de kiem dinh tinh vung. "
-        "Neu BL thuong EW o ca hai nua, ket qua khong phai may man. "
-        "Period 1: truoc COVID / tang truong; Period 2: hau COVID / bien dong.", BODY_STYLE,
-    ))
-    df_sp = load("subperiod_analysis.csv")
-    story.append(df_to_table(df_sp, font_size=8))
-
-    story.append(PageBreak())
-
-    # ════════════════════════════════════════════════════════════════════════
-    # SECTION 12 – K-MEANS K VALIDATION
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "12. Kiem dinh so cum K toi uu (Elbow + Silhouette)", 1)
-    story.append(Paragraph(
-        "Xac dinh k toi uu cho K-means bang hai phuong phap: "
-        "(1) Elbow method - inertia giam nhanh roi cham lai tai 'knee'; "
-        "(2) Silhouette score (Rousseeuw 1987) - do muc do tach biet giua cac cum. "
-        "Ket qua OOS cho thay k=4 toi uu ve Sharpe, nhat quan voi analysis nay.", BODY_STYLE,
-    ))
-    df_ks = load("kmeans_k_summary.csv")
-    story.append(df_to_table(df_ks, col_widths=[2*cm, 4*cm, 4.5*cm, 4.5*cm], font_size=9))
-
-    story.append(PageBreak())
-
-    # ════════════════════════════════════════════════════════════════════════
-    # APPENDIX – RF RATE TABLE
-    # ════════════════════════════════════════════════════════════════════════
-    section(story, "Phụ lục – Lãi suất Phi rủi ro VN10Y theo Năm", 1)
+    # ══════════════════════════════════════════════════════════════════════════
+    # PHỤ LỤC – LÃI SUẤT PHI RỦI RO & PHƯƠNG PHÁP LUẬN
+    # ══════════════════════════════════════════════════════════════════════════
+    section(story, "Phụ lục A – Lãi suất Phi rủi ro VN10Y")
     story.append(Paragraph(
         "Lãi suất trái phiếu chính phủ Việt Nam kỳ hạn 10 năm (VN10Y) "
-        "được dùng làm lãi suất phi rủi ro. "
-        "Lãi suất tháng = VN10Y_năm / 12.", BODY_STYLE,
-    ))
+        "dùng làm lãi suất phi rủi ro time-varying. "
+        "RF tháng = VN10Y_năm / 100 / 12.", BODY_STYLE))
     rf_data = [
-        ["Năm", "VN10Y (% năm)", "RF tháng (%)"],
-        ["2014", "6.50", "0.5417"],
-        ["2015", "6.50", "0.5417"],
-        ["2016", "6.20", "0.5167"],
-        ["2017", "5.80", "0.4833"],
-        ["2018", "4.58", "0.3817"],
-        ["2019", "4.58", "0.3817"],
-        ["2020", "3.00", "0.2500"],
-        ["2021", "2.53", "0.2108"],
-        ["2022", "4.00", "0.3333"],
-        ["2023", "3.50", "0.2917"],
-        ["2024", "3.06", "0.2550"],
-        ["2025", "3.10", "0.2583"],
+        ["Năm", "VN10Y (%/năm)", "RF tháng (%)"],
+        ["2014", "6.50", "0.5417"], ["2015", "6.50", "0.5417"],
+        ["2016", "6.20", "0.5167"], ["2017", "5.80", "0.4833"],
+        ["2018", "4.58", "0.3817"], ["2019", "4.58", "0.3817"],
+        ["2020", "3.00", "0.2500"], ["2021", "2.53", "0.2108"],
+        ["2022", "4.00", "0.3333"], ["2023", "3.50", "0.2917"],
+        ["2024", "3.06", "0.2550"], ["2025", "3.10", "0.2583"],
         ["2026", "4.35", "0.3625"],
     ]
-    rf_tbl = Table(rf_data, colWidths=[3*cm, 4*cm, 4*cm], hAlign="LEFT")
+    rf_tbl = Table(rf_data, colWidths=[3.5*cm, 5*cm, 5*cm], hAlign="LEFT")
     rf_tbl.setStyle(TableStyle([
-        ("BACKGROUND",  (0, 0), (-1, 0), C_NAVY),
-        ("TEXTCOLOR",   (0, 0), (-1, 0), C_WHITE),
-        ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME",    (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE",    (0, 0), (-1, -1), 9),
-        ("ALIGN",       (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",  (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING",(0,0), (-1, -1), 5),
-        ("GRID",        (0, 0), (-1, -1), 0.5, colors.HexColor("#90a4ae")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C_WHITE, C_ALT]),
+        ("FONTNAME",     (0, 0), (-1, 0),  "FreeSansBold"),
+        ("FONTNAME",     (0, 1), (-1, -1), "FreeSans"),
+        ("FONTSIZE",     (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR",    (0, 0), (-1, -1), BLACK),
+        ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
+        ("LINEBELOW",    (0, 0), (-1, 0),  1.0, BLACK),
+        ("GRID",         (0, 0), (-1, -1), 0.4, MGRAY),
+        ("ROWBACKGROUNDS",(0,1), (-1,-1),  [WHITE, LGRAY]),
+        ("TOPPADDING",   (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
     ]))
     story.append(rf_tbl)
+
+    story.append(Spacer(1, 0.6*cm))
+    section(story, "Phụ lục B – Tóm tắt Phương pháp luận", level=2)
+    method_lines = [
+        "• Dữ liệu: Giá đóng cửa tháng và vốn hóa thị trường của 25 cổ phiếu ngân hàng "
+        "niêm yết (HOSE/HNX), giai đoạn 06/2014 – 05/2026 (144 tháng).",
+        "• Cửa sổ trượt (rolling window): 36 tháng, tái cân bằng hàng tháng.",
+        "• Phân cụm K-means (k=4): feature = (idiosyncratic momentum 6-1 tháng, −vol). "
+        "Tín hiệu tổng hợp theo Jegadeesh & Titman (1993) và Baker, Bradley & Wurgler (2011).",
+        "• Black-Litterman: Π = δ·Σ·w_mkt (Reverse-CAPM); Ω = τ·P·Σ·Pᵀ; "
+        "μ_BL = M⁻¹[(τΣ)⁻¹Π + Pᵀ·Ω⁻¹·q]; Σ_BL = M⁻¹ + Σ; τ = 1/36.",
+        "• Tối ưu hóa: SLSQP maximise Sharpe(μ_BL, Σ_BL), Σw=1, 0≤w≤30%, 10 điểm xuất phát.",
+        "• Đánh giá: OOS 106 tháng; Sharpe, Sortino, MDD, Calmar, Win-rate.",
+        "• Kiểm định: Paired t-test, Jobson-Korkie (1981), Jarque-Bera, Ljung-Box.",
+        "• Monte Carlo: 2000 mô phỏng nhiễu view q (khai thác tính tuyến tính của BL).",
+    ]
+    for line in method_lines:
+        story.append(Paragraph(line, BODY_STYLE))
 
     # ── Build ────────────────────────────────────────────────────────────────
     doc.build(story)
@@ -512,5 +483,4 @@ def build_pdf():
 
 
 if __name__ == "__main__":
-    print("Building PDF report...")
-    build_pdf()
+    build_report()
