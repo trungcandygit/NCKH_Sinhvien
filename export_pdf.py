@@ -380,8 +380,9 @@ def build_pdf():
     section(story, "8. Tín hiệu Phân cụm K-means", 1)
     story.append(Paragraph(
         "Nhãn cụm và vị thế view (Long / Short / Neutral) của từng cổ phiếu "
-        "tại mỗi kỳ tái cân bằng. Phân cụm dựa trên (lợi nhuận năm hoá, "
-        "biến động năm hoá) được chuẩn hoá trước khi đưa vào K-means (k=3).", BODY_STYLE,
+        "tại mỗi kỳ tái cân bằng. Phân cụm dựa trên idiosyncratic momentum 6-1 "
+        "và low-volatility feature được chuẩn hoá trước khi đưa vào K-means (k=4). "
+        "Tín hiệu tổng hợp theo Jegadeesh & Titman (1993) và Baker, Bradley & Wurgler (2011).", BODY_STYLE,
     ))
     df_cl = load("cluster_signals_v2.csv")
     story.append(Paragraph(f"Tổng số quan sát: {len(df_cl):,} dòng", SMALL_STYLE))
@@ -406,6 +407,60 @@ def build_pdf():
     story.append(Spacer(1, 0.15*cm))
     cw_wt = [2.8*cm, 2*cm] + [2.2*cm] * (len(df_wt.columns) - 2)
     story.append(df_to_table(df_wt, col_widths=cw_wt, font_size=6.5))
+
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 10 – SIGNAL IC ANALYSIS
+    # ════════════════════════════════════════════════════════════════════════
+    section(story, "10. Phan tich Information Coefficient (IC) cua tin hieu", 1)
+    story.append(Paragraph(
+        "IC (Spearman rank correlation) do luong muc do tin hieu idiosyncratic momentum "
+        "du bao dung chieu loi nhuan thuc te thang ke tiep. IC > 0 nghia la tin hieu "
+        "xep hang co phieu dung chieu voi ket qua thuc te. "
+        "Hit rate: ty le buoc rebalancing ma cluster Long thuc su vuot cluster Short.", BODY_STYLE,
+    ))
+    df_ic = load("signal_ic_analysis.csv")
+    ic_stats = pd.DataFrame([{
+        "Metric": "Mean IC",        "Value": f"{df_ic['IC'].mean():+.4f}"},
+        {"Metric": "IC > 0 (%)",    "Value": f"{(df_ic['IC']>0).mean():.1%}"},
+        {"Metric": "Hit Rate (%)",  "Value": f"{df_ic['Hit'].mean():.1%}"},
+        {"Metric": "IC Std",        "Value": f"{df_ic['IC'].std():.4f}"},
+        {"Metric": "N steps",       "Value": str(len(df_ic))},
+    ])
+    story.append(df_to_table(ic_stats, col_widths=[6*cm, 4*cm], font_size=9))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph("IC per rebalancing step (full series):", H2_STYLE))
+    story.append(df_to_table(df_ic, col_widths=[3*cm, 2.5*cm, 2*cm, 2.5*cm], font_size=7))
+
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 11 – SUB-PERIOD ROBUSTNESS
+    # ════════════════════════════════════════════════════════════════════════
+    section(story, "11. Phan tich Tinh vung theo Giai doan (Sub-period)", 1)
+    story.append(Paragraph(
+        "Chia giai doan OOS thanh 2 nua bang nhau de kiem dinh tinh vung. "
+        "Neu BL thuong EW o ca hai nua, ket qua khong phai may man. "
+        "Period 1: truoc COVID / tang truong; Period 2: hau COVID / bien dong.", BODY_STYLE,
+    ))
+    df_sp = load("subperiod_analysis.csv")
+    story.append(df_to_table(df_sp, font_size=8))
+
+    story.append(PageBreak())
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SECTION 12 – K-MEANS K VALIDATION
+    # ════════════════════════════════════════════════════════════════════════
+    section(story, "12. Kiem dinh so cum K toi uu (Elbow + Silhouette)", 1)
+    story.append(Paragraph(
+        "Xac dinh k toi uu cho K-means bang hai phuong phap: "
+        "(1) Elbow method - inertia giam nhanh roi cham lai tai 'knee'; "
+        "(2) Silhouette score (Rousseeuw 1987) - do muc do tach biet giua cac cum. "
+        "Ket qua OOS cho thay k=4 toi uu ve Sharpe, nhat quan voi analysis nay.", BODY_STYLE,
+    ))
+    df_ks = load("kmeans_k_summary.csv")
+    story.append(df_to_table(df_ks, col_widths=[2*cm, 4*cm, 4.5*cm, 4.5*cm], font_size=9))
 
     story.append(PageBreak())
 

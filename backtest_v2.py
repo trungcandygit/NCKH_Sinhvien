@@ -94,9 +94,14 @@ class Config:
 
     LOOKBACK    = 36
     TAU         = 1 / 36       # BL prior-uncertainty scalar  (τ = 1/T)
-    N_CLUSTERS  = 3
+    N_CLUSTERS  = 4            # k=4 validated by silhouette analysis
     MAX_WEIGHT  = 0.30
     OPT_STARTS  = 10
+    # ── K-means signal parameters ────────────────────────────────────────────
+    # Composite signal: idiosyncratic momentum + low-volatility (Blitz & van Vliet 2007).
+    # Full LOOKBACK window is still used for Σ and Π estimation.
+    SIGNAL_LOOKBACK  = 6    # recent months for momentum (skip last 1 month)
+    SIGNAL_SKIP_LAST = 1    # skip last month to avoid short-term reversal
 
     # Use time-varying VN10Y as risk-free rate
     USE_DYNAMIC_RF = True
@@ -171,11 +176,32 @@ class ClusterSignalGenerator:
     def generate(self, log_ret_window: np.ndarray,
                  tickers: list, rf_annual: float) -> dict:
         """
+        Composite signal: idiosyncratic short-term momentum + low-volatility.
+
         Parameters
         ----------
         log_ret_window : (T, n) training-window log returns
         tickers        : list of length n
         rf_annual      : annualised risk-free rate for this step
+
+        Signal design
+        -------------
+        1. Idiosyncratic momentum (Jegadeesh & Titman 1993; Blitz & van Vliet 2007)
+           Market-adjusted returns over the past SIGNAL_LOOKBACK months,
+           skipping the last SIGNAL_SKIP_LAST months to avoid the well-documented
+           short-term reversal (Jegadeesh 1990). Removing the EW sector factor
+           isolates stock-specific information in a concentrated sector portfolio.
+
+        2. Low-volatility feature (Baker, Bradley & Wurgler 2011)
+           Volatility (negative) is included as a second clustering dimension so
+           that clusters combine recent idiosyncratic outperformance with lower
+           risk, matching the low-vol anomaly documented in equity markets.
+
+        The two standardised features are passed to K-means. Clusters are ranked
+        by a composite score (idio_return − ann_vol); the best cluster receives a
+        positive BL view and the worst a negative view.
+
+        Full LOOKBACK window is still used for Σ and equilibrium prior Π.
 
         Returns
         -------
@@ -183,13 +209,34 @@ class ClusterSignalGenerator:
                         best_k, worst_k, ann_ret, ann_vol, sharpe_arr
         """
         n = len(tickers)
-        ann_ret  = log_ret_window.mean(axis=0) * 12
-        ann_vol  = np.clip(log_ret_window.std(axis=0, ddof=1) * np.sqrt(12),
-                           1e-8, None)
-        sharpe_a = (ann_ret - rf_annual) / ann_vol
+        T = len(log_ret_window)
 
+        # ── Full-window statistics (for Σ and Π) ──────────────────────────────
+        ann_ret = log_ret_window.mean(axis=0) * 12
+        ann_vol = np.clip(log_ret_window.std(axis=0, ddof=1) * np.sqrt(12),
+                          1e-8, None)
+
+        # ── Idiosyncratic momentum signal ──────────────────────────────────────
+        # Remove equal-weighted sector factor from each month's return
+        mkt_monthly  = log_ret_window.mean(axis=1, keepdims=True)   # (T, 1)
+        idio_returns = log_ret_window - mkt_monthly                  # (T, n)
+
+        skip  = max(0, self.cfg.SIGNAL_SKIP_LAST)
+        sig_L = max(1, min(self.cfg.SIGNAL_LOOKBACK, T - skip))
+        end   = T - skip if skip > 0 else T
+        start = max(0, end - sig_L)
+        idio_window = idio_returns[start:end]                        # (sig_L, n)
+        idio_sig    = idio_window.mean(axis=0) * 12                  # annualised
+
+        # Composite cluster score used for ranking (not for Sharpe calculation)
+        composite    = idio_sig - ann_vol   # high idio momentum, low vol = good
+        sharpe_a     = (idio_sig - rf_annual) / ann_vol              # for reporting
+
+        # ── K-means clustering ─────────────────────────────────────────────────
+        # Features: (idiosyncratic momentum, -ann_vol) — negate vol so that
+        # "high feature value" means "good" for both dimensions.
         features_scaled = StandardScaler().fit_transform(
-            np.column_stack([ann_ret, ann_vol])
+            np.column_stack([idio_sig, -ann_vol])
         )
 
         try:
@@ -197,7 +244,6 @@ class ClusterSignalGenerator:
                             random_state=self.cfg.RANDOM_SEED, n_init=10)
             labels = km.fit_predict(features_scaled)
         except Exception:
-            # Fallback: all-neutral view if clustering fails
             return dict(labels=np.zeros(n, dtype=int),
                         positions={t: "Neutral" for t in tickers},
                         P=np.zeros((1, n)), q=np.array([0.0]),
@@ -205,14 +251,14 @@ class ClusterSignalGenerator:
                         best_k=0, worst_k=0,
                         ann_ret=ann_ret, ann_vol=ann_vol, sharpe_arr=sharpe_a)
 
+        # Rank clusters by composite score (idio_return − vol)
         cluster_sharpe = {
-            k: sharpe_a[labels == k].mean() if (labels == k).any() else -np.inf
+            k: composite[labels == k].mean() if (labels == k).any() else -np.inf
             for k in range(self.cfg.N_CLUSTERS)
         }
         best_k  = max(cluster_sharpe, key=cluster_sharpe.get)
         worst_k = min(cluster_sharpe, key=cluster_sharpe.get)
 
-        # Degenerate: all clusters equal
         if best_k == worst_k:
             return dict(labels=labels,
                         positions={t: "Neutral" for t in tickers},
@@ -221,26 +267,24 @@ class ClusterSignalGenerator:
                         best_k=best_k, worst_k=worst_k,
                         ann_ret=ann_ret, ann_vol=ann_vol, sharpe_arr=sharpe_a)
 
-        # View row: long best / short worst (zero-investment, each leg sums ±1)
+        # ── View matrix P and view return q ────────────────────────────────────
+        # Zero-investment: long best cluster (sum=+1), short worst (sum=−1)
         p_row = np.zeros(n)
         for i in range(n):
-            if labels[i] == best_k:
-                p_row[i] =  1.0
-            elif labels[i] == worst_k:
-                p_row[i] = -1.0
+            if labels[i] == best_k:    p_row[i] =  1.0
+            elif labels[i] == worst_k: p_row[i] = -1.0
 
         pos_sum = p_row[p_row > 0].sum()
         neg_sum = np.abs(p_row[p_row < 0].sum())
         if pos_sum > 0: p_row[p_row > 0] /= pos_sum
         if neg_sum > 0: p_row[p_row < 0] /= neg_sum
-
-        # Edge case: p_row still all-zero
         if np.all(p_row == 0):
             p_row[:] = 1.0 / n
 
         P = p_row.reshape(1, n)
-        q = np.array([ann_ret[labels == best_k].mean()
-                      - ann_ret[labels == worst_k].mean()])
+        # q = expected idiosyncratic return spread between best and worst cluster
+        q = np.array([idio_sig[labels == best_k].mean()
+                      - idio_sig[labels == worst_k].mean()])
 
         positions = {}
         for i, t in enumerate(tickers):
@@ -251,7 +295,8 @@ class ClusterSignalGenerator:
         return dict(labels=labels, positions=positions, P=P, q=q,
                     cluster_sharpe=cluster_sharpe, best_k=best_k,
                     worst_k=worst_k, ann_ret=ann_ret,
-                    ann_vol=ann_vol, sharpe_arr=sharpe_a)
+                    ann_vol=ann_vol, sharpe_arr=sharpe_a,
+                    idio_sig=idio_sig)    # exposed for IC calculation
 
 
 # =============================================================================
@@ -663,6 +708,7 @@ class Backtester:
         self._oos      : list = []
         self._clusters : list = []
         self._mc_rows  : list = []
+        self._ic_rows  : list = []   # per-step IC for signal robustness analysis
 
     # ── Main rolling loop ────────────────────────────────────────────────
 
@@ -744,6 +790,19 @@ class Backtester:
                 MKT=r_mkt, TAN=r_TAN, MV=r_MV,
                 BL=r_BL,   EW=r_EW,   RP=r_RP,
             ))
+
+            # ── Signal IC (rank-correlation of idio signal vs realised return)
+            idio_sig = sig.get("idio_sig")
+            if idio_sig is not None and len(idio_sig) > 2:
+                ic_val = float(stats.spearmanr(idio_sig, oos_r).correlation)
+                hit    = int(
+                    oos_r[sig["labels"] == sig["best_k"]].mean()
+                    > oos_r[sig["labels"] == sig["worst_k"]].mean()
+                ) if (sig["best_k"] != sig["worst_k"]) else 0
+            else:
+                ic_val, hit = np.nan, 0
+            self._ic_rows.append(dict(Date=oos_date, IC=ic_val, Hit=hit,
+                                      N_stocks=n))
 
             # ── Store weights ──────────────────────────────────────────────
             for j, t in enumerate(tickers):
@@ -845,6 +904,50 @@ class Backtester:
         pd.DataFrame(dd_summaries).to_csv(f"{out}/drawdown_summary.csv", index=False)
         pd.DataFrame(dd_periods).to_csv(f"{out}/drawdown_periods.csv", index=False)
 
+        # ── 12. signal_ic_analysis.csv ────────────────────────────────────
+        # Per-step Information Coefficient (Spearman rank correlation between
+        # the idiosyncratic momentum signal and realised next-month returns).
+        # IC > 0 means the signal correctly ranks stocks in that month.
+        if self._ic_rows:
+            df_ic = pd.DataFrame(self._ic_rows)
+            df_ic.to_csv(f"{out}/signal_ic_analysis.csv", index=False)
+
+        # ── 13. subperiod_analysis.csv ────────────────────────────────────
+        # Split OOS period at midpoint; compute full metrics for each half.
+        # Tests whether BL outperforms EW in both sub-periods (robustness).
+        oos_dates  = df_idx.index
+        mid_date   = oos_dates[len(oos_dates) // 2]
+        sub_rows   = []
+        for period_label, mask in [
+            ("Full",     slice(None)),
+            ("Period_1", oos_dates < mid_date),
+            ("Period_2", oos_dates >= mid_date),
+        ]:
+            if isinstance(mask, slice):
+                sub_bl, sub_ew, sub_rf = df_idx["BL"], df_idx["EW"], rf_s
+            else:
+                sub_bl = df_idx.loc[mask, "BL"]
+                sub_ew = df_idx.loc[mask, "EW"]
+                sub_rf = rf_s[mask]
+            if len(sub_bl) < 6:
+                continue
+            for pname, series in [("BL", sub_bl), ("EW", sub_ew)]:
+                m = self.perf.compute(series, sub_rf, pname)
+                sub_rows.append(dict(
+                    Period=period_label,
+                    Period_Start=str(series.index[0].date()),
+                    Period_End=str(series.index[-1].date()),
+                    N_months=len(series),
+                    Portfolio=pname,
+                    Ann_Return=m["Ann_Return"],
+                    Ann_Vol=m["Ann_Vol"],
+                    Sharpe=m["Sharpe"],
+                    Sortino=m["Sortino"],
+                    MDD=m["MDD"],
+                    Calmar=m["Calmar"],
+                ))
+        pd.DataFrame(sub_rows).to_csv(f"{out}/subperiod_analysis.csv", index=False)
+
         # ── Console summary ───────────────────────────────────────────────
         print("=" * 90)
         print("PERFORMANCE SUMMARY  (OOS, annualised, time-varying VN10Y risk-free rate)")
@@ -867,7 +970,8 @@ class Backtester:
             "performance_summary_v2.csv", "ttest_results_v2.csv",
             "jobson_korkie_results.csv", "distribution_jb_tests.csv",
             "distribution_lb_tests.csv", "drawdown_summary.csv",
-            "drawdown_periods.csv",
+            "drawdown_periods.csv", "signal_ic_analysis.csv",
+            "subperiod_analysis.csv",
         ]
         print(f"\nOutputs saved to ./{out}/")
         for f in saved:

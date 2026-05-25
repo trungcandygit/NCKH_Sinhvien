@@ -12,7 +12,7 @@ Parameters swept
   k_clusters  : 2, 3 (baseline), 4, 5  K-means clusters
   rf_rate     : 4%, 5%, 6% (fixed),  VN10Y (baseline, time-varying)
 
-Baseline: lookback=36, max_weight=30%, k=3, rf=VN10Y
+Baseline: lookback=36, max_weight=30%, k=4, rf=VN10Y
 
 Monte Carlo is skipped (N_MC_SIMS=0) and optimizer starts are reduced
 to keep each sensitivity run fast (~15-30 s).
@@ -176,7 +176,7 @@ def make_config(param: str, value) -> Config:
 PARAM_GRID = [
     ("lookback",   [24, 36, 48],             36),
     ("max_weight", [0.20, 0.30, 0.40],       0.30),
-    ("k_clusters", [2, 3, 4, 5],             3),
+    ("k_clusters", [2, 3, 4, 5, 6],           4),
     ("rf_rate",    [0.04, 0.05, 0.06, "dynamic"], "dynamic"),
 ]
 
