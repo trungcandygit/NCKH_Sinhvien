@@ -351,6 +351,28 @@ def build():
         kd[c] = kd[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
     s.append(tbl(kd, cw=[2*cm,2.5*cm]+[2.8*cm]*len(pcols), fs=8.5))
 
+    s.append(Spacer(1, 0.4*cm))
+
+    # 4c. Per-step k validation raw data
+    sec(s, "4c. Dữ liệu Inertia + Silhouette theo từng bước OOS (75 bước)", level=2)
+    src(s, "kmeans_k_validation.csv")
+    s.append(Paragraph(
+        "Tại mỗi bước rolling window: inertia và silhouette score cho k=2..6. "
+        "Mỗi dòng là 1 bước OOS. Đây là dữ liệu gốc tính mean ở bảng 4a.", BODY))
+    df_kv = load("kmeans_k_validation.csv")
+    # Format numbers
+    dkv = df_kv.copy()
+    for c in dkv.columns:
+        if c == "Date":
+            pass
+        elif "inertia" in c:
+            dkv[c] = dkv[c].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
+        elif "silhouette" in c:
+            dkv[c] = dkv[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
+    n_cols = len(dkv.columns)
+    cw_kv = [3*cm] + [2.8*cm] * (n_cols - 1)
+    s.append(tbl(dkv, cw=cw_kv, fs=6.5))
+
     s.append(PageBreak())
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -448,7 +470,9 @@ def build():
         "cho phép 2,000 mô phỏng mà không cần tối ưu lại. "
         "BL_KIO và TAN đều ổn định qua dải nhiễu.", BODY))
     df_mc = load("monte_carlo_v2.csv")
-    # Summarise the full 2000-sim distribution per delta level
+
+    # 8a. Summary table – distribution stats per delta
+    sec(s, "8a. Thống kê phân phối Sharpe theo mức nhiễu (5 delta × 2,000 sims)", level=2)
     bl_grp = df_mc.groupby("Delta_Noise")["Sharpe_BL_KIO"].agg(
         N="count", Mean="mean", Std="std", Min="min",
         Pct5=lambda x: x.quantile(0.05), Pct95=lambda x: x.quantile(0.95), Max="max"
@@ -462,6 +486,21 @@ def build():
         "Max": "BL_KIO Max", "Sharpe_TAN_mean": "TAN Mean"
     })
     s.append(tbl(bl_grp, fs=8))
+
+    s.append(Spacer(1, 0.4*cm))
+
+    # 8b. Full raw MC data – all 10,000 rows (5 delta × 2,000 Sim_ID)
+    sec(s, "8b. Dữ liệu Monte Carlo đầy đủ – 10,000 dòng (Delta_Noise × Sim_ID)", level=2)
+    s.append(Paragraph(
+        "Toàn bộ 10,000 giá trị Sharpe mô phỏng: 5 mức nhiễu × 2,000 sim. "
+        "Sharpe_BL_KIO = trung bình qua 106 bước OOS của từng sim. "
+        "Dùng để vẽ histogram phân phối cho mỗi mức nhiễu.", BODY))
+    dmc_full = df_mc.copy()
+    dmc_full["Sharpe_BL_KIO"] = dmc_full["Sharpe_BL_KIO"].apply(lambda x: f"{x:.6f}")
+    dmc_full["Sharpe_TAN"]    = dmc_full["Sharpe_TAN"].apply(lambda x: f"{x:.6f}")
+    dmc_full["Delta_Noise"]   = dmc_full["Delta_Noise"].apply(lambda x: f"{x:+.0%}")
+    cw_mc = [3*cm, 2.5*cm, 4.5*cm, 4.5*cm]
+    s.append(tbl(dmc_full, cw=cw_mc, fs=6))
 
     s.append(PageBreak())
 
