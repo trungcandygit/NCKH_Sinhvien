@@ -145,7 +145,8 @@ def cover(story):
         ["Dữ liệu",         "25 cổ phiếu ngân hàng niêm yết (HOSE/HNX), 06/2014 – 05/2026, tần suất tháng"],
         ["Phương pháp",     "Rolling window 36 tháng · K-means (k=4) · Black-Litterman · SLSQP"],
         ["Tín hiệu BL",     "Idiosyncratic momentum 6-1 tháng + Low-volatility composite (Blitz & van Vliet 2007)"],
-        ["Kết quả chính",   "BL Sharpe = 0.9396 | BL Return = 30.1% | BL MDD = -30.7%"],
+        ["Kết quả chính",   "BL_KIO Sharpe = 0.9396 | BL_KIO Return = 30.1% | BL_KIO MDD = -30.7%"],
+        ["BL gốc (no-view)","BL Sharpe = 0.7967 | BL Return = 27.2% | BL MDD = -36.7%"],
         ["Benchmark 1/N",   "EW Sharpe = 0.8373 | EW Return = 26.6% | EW MDD = -36.6%"],
         ["Giai đoạn OOS",   "106 tháng (08/2017 – 05/2026) · RF = VN10Y/12 (time-varying)"],
         ["Kiểm định",       "Jobson-Korkie (1981) · Paired t-test · Jarque-Bera · Ljung-Box · Monte Carlo 2,000 sims"],
@@ -186,11 +187,13 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 1. HIỆU SUẤT ĐẦY ĐỦ – 6 danh mục
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "1. Tóm tắt Hiệu suất – 6 Danh mục (OOS 106 tháng, annualised)")
+    sec(s, "1. Tóm tắt Hiệu suất – 7 Danh mục (OOS 106 tháng, annualised)")
     s.append(Paragraph(
-        "So sánh toàn diện 6 danh mục đầu tư trên 7 chỉ số. "
+        "So sánh toàn diện 7 danh mục đầu tư trên 7 chỉ số. "
         "MKT = Market-cap weighted; TAN = Tangency (max-Sharpe lịch sử); "
-        "MV = Min-Variance; BL = Black-Litterman (mô hình đề xuất); "
+        "MV = Min-Variance; "
+        "BL = Black-Litterman gốc (không có views – chỉ dùng equilibrium Π, μ_BL=Π); "
+        "BL_KIO = BL + K-means Idiosyncratic + low-vol signal (mô hình đề xuất); "
         "EW = Equal-Weight 1/N (benchmark DeMiguel et al. 2009); "
         "RP = Risk-Parity (inverse-vol). "
         "Lãi suất phi rủi ro = VN10Y/12 (time-varying).", BODY))
@@ -202,16 +205,16 @@ def build():
     for col in ["Sharpe","Sortino","Calmar"]:
         dp[col] = dp[col].apply(lambda x: f"{x:.4f}")
     dp["Win_Rate"] = dp["Win_Rate"].apply(lambda x: f"{x*100:.1f}%")
-    cw_p = [2.8*cm, 3.5*cm, 3.2*cm, 3.2*cm, 3.5*cm, 3.2*cm, 3.2*cm, 3.2*cm]
-    s.append(tbl(dp, cw=cw_p, fs=8.5))
+    cw_p = [2.5*cm, 3.2*cm, 3.0*cm, 3.0*cm, 3.2*cm, 3.0*cm, 3.0*cm, 3.0*cm]
+    s.append(tbl(dp, cw=cw_p, fs=8))
 
     s.append(Spacer(1, 0.4*cm))
 
     # 1b. Paired t-test
-    sec(s, "1b. Kiểm định t-test theo cặp (BL vs 5 danh mục còn lại)", level=2)
+    sec(s, "1b. Kiểm định t-test theo cặp (BL_KIO vs 6 danh mục còn lại)", level=2)
     s.append(Paragraph(
-        "H₀: E[r_BL] = E[r_other] (paired t-test trên lợi nhuận tháng OOS). "
-        "t > 0: BL có lợi nhuận trung bình cao hơn. "
+        "H₀: E[r_BL_KIO] = E[r_other] (paired t-test trên lợi nhuận tháng OOS). "
+        "t > 0: BL_KIO có lợi nhuận trung bình cao hơn. "
         "p < 0.05: có ý nghĩa thống kê 5%.", BODY))
     df_tt = load("ttest_results_v2.csv")
     s.append(tbl(df_tt, cw=[4*cm,4*cm,4*cm,5*cm], fs=8.5))
@@ -221,10 +224,10 @@ def build():
     # 1c. Jobson-Korkie
     sec(s, "1c. Kiểm định Jobson-Korkie (1981) – So sánh Sharpe Ratio", level=2)
     s.append(Paragraph(
-        "H₀: SR_BL = SR_other (two-sided). "
-        "z > 0: BL có Sharpe cao hơn. "
+        "H₀: SR_BL_KIO = SR_other (two-sided). "
+        "z > 0: BL_KIO có Sharpe cao hơn. "
         "p < 0.05: sự khác biệt Sharpe có ý nghĩa thống kê. "
-        "Lưu ý: BL vs MV có p = 0.020 (significant ★).", BODY))
+        "Lưu ý: BL_KIO vs MV có p = 0.020 (significant ★).", BODY))
     df_jk = load("jobson_korkie_results.csv")
     djk = df_jk.copy()
     djk["z_statistic"] = djk["z_statistic"].apply(lambda x: f"{x:.4f}")
@@ -238,13 +241,13 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 2. SUB-PERIOD – TẤT CẢ 6 PORTFOLIO × 3 GIAI ĐOẠN
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "2. Phân tích Tính vững theo Giai đoạn (18 dòng = 6 portfolio × 3 giai đoạn)")
+    sec(s, "2. Phân tích Tính vững theo Giai đoạn (21 dòng = 7 portfolio × 3 giai đoạn)")
     s.append(Paragraph(
         "Giai đoạn OOS chia làm 2 nửa bằng nhau (mỗi nửa ~53 tháng). "
         "Period 1 (08/2017–12/2021): thị trường bull, tăng trưởng mạnh. "
         "Period 2 (01/2022–05/2026): biến động cao, lãi suất tăng, hậu COVID. "
-        "BL thống trị Period 2 (Sharpe 0.861 vs EW 0.384, TAN 0.043, MV −0.097), "
-        "chứng minh tín hiệu hoạt động khi thị trường bất định nhất.", BODY))
+        "BL_KIO thống trị Period 2 (Sharpe 0.861 vs BL gốc 0.518, EW 0.384, TAN 0.043, MV −0.097), "
+        "chứng minh K-means signal thêm giá trị thực sự (+0.343 Sharpe) so với BL gốc.", BODY))
     df_sp = load("subperiod_analysis.csv")
 
     for period in ["Full", "Period_1", "Period_2"]:
@@ -267,11 +270,11 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 3. SENSITIVITY – TẤT CẢ 6 PORTFOLIO
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "3. Phân tích Độ nhạy Tham số (One-at-a-time) – 6 Danh mục")
+    sec(s, "3. Phân tích Độ nhạy Tham số (One-at-a-time) – 7 Danh mục")
     s.append(Paragraph(
         "Thay đổi một tham số tại một thời điểm, giữ nguyên các tham số còn lại "
         "(baseline: lookback=36, max_weight=30%, k=4, rf=VN10Y dynamic). "
-        "Mỗi bảng hiển thị Sharpe của tất cả 6 danh mục để so sánh trực tiếp. "
+        "Mỗi bảng hiển thị Sharpe của tất cả 7 danh mục để so sánh trực tiếp. "
         "★ = baseline value.", BODY))
 
     df_s = load("sensitivity_results.csv")
@@ -289,14 +292,13 @@ def build():
             lambda x: "★" if (x == True or x == 1 or str(x)=="True") else "")
         pivot = pivot.rename(columns={"Value": "Tham số", "Is_Baseline": "Baseline"})
         # Reorder portfolio columns
-        port_cols = [c for c in ["MKT","TAN","MV","BL","EW","RP"] if c in pivot.columns]
+        port_cols = [c for c in ["MKT","TAN","MV","BL","BL_KIO","EW","RP"] if c in pivot.columns]
         disp = pivot[["Tham số","Baseline"] + port_cols].copy()
         for c in port_cols:
             disp[c] = disp[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
 
         sec(s, f"Tham số: {param}", level=2)
-        n_cols = len(disp.columns)
-        cw_s = [3.5*cm, 2*cm] + [3*cm] * len(port_cols)
+        cw_s = [3.2*cm, 2*cm] + [2.8*cm] * len(port_cols)
         s.append(tbl(disp, cw=cw_s, fs=8))
         s.append(Spacer(1, 0.2*cm))
 
@@ -321,13 +323,11 @@ def build():
 
     s.append(Spacer(1, 0.4*cm))
 
-    # 4b. k-sensitivity for BL Sharpe
-    sec(s, "4b. BL Sharpe theo từng giá trị k (cùng composite signal)", level=2)
+    # 4b. k-sensitivity for BL_KIO Sharpe
+    sec(s, "4b. BL_KIO Sharpe theo từng giá trị k (cùng composite signal)", level=2)
     s.append(Paragraph(
         "Sensitivity của k trong PARAM_GRID (k=2…6, baseline k=4). "
         "Chú ý: k=6 có mẫu khác (yêu cầu ≥8 cổ phiếu active) nên EW Sharpe khác.", BODY))
-    k_rows = df_s[df_s["Parameter"]=="k_clusters"][
-        df_s["Parameter"]=="k_clusters"].copy()
     k_bl_ew = df_s[df_s["Parameter"]=="k_clusters"][
         ["Value","Is_Baseline","Portfolio","Sharpe"]
     ]
@@ -337,11 +337,11 @@ def build():
     k_pivot["Is_Baseline"] = k_pivot["Is_Baseline"].apply(
         lambda x: "★" if (x==True or x==1 or str(x)=="True") else "")
     k_pivot = k_pivot.rename(columns={"Value":"k","Is_Baseline":"Baseline"})
-    pcols = [c for c in ["MKT","TAN","MV","BL","EW","RP"] if c in k_pivot.columns]
+    pcols = [c for c in ["MKT","TAN","MV","BL","BL_KIO","EW","RP"] if c in k_pivot.columns]
     kd = k_pivot[["k","Baseline"]+pcols].copy()
     for c in pcols:
         kd[c] = kd[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
-    s.append(tbl(kd, cw=[2*cm,2.5*cm]+[3*cm]*len(pcols), fs=8.5))
+    s.append(tbl(kd, cw=[2*cm,2.5*cm]+[2.8*cm]*len(pcols), fs=8.5))
 
     s.append(PageBreak())
 
@@ -373,12 +373,12 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 6. DRAWDOWN – TẤT CẢ 6 PORTFOLIO
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "6. Phân tích Drawdown Chi tiết – 6 Danh mục")
+    sec(s, "6. Phân tích Drawdown Chi tiết – 7 Danh mục")
     sec(s, "6a. Tóm tắt Drawdown", level=2)
     s.append(Paragraph(
-        "BL có Max_DD thấp nhất trong các danh mục tối ưu hóa (-30.7%). "
+        "BL_KIO có Max_DD thấp nhất trong các danh mục tối ưu hóa (-30.7%). "
         "Avg_DD_Depth = -9.48% (nhỏ hơn nhiều so với TAN -24.9% và EW -15.4%). "
-        "Avg_Recovery_Months BL = 3.8 (nhanh hơn TAN 9.6 và MV 11.8).", BODY))
+        "Avg_Recovery_Months BL_KIO = 3.8 (nhanh hơn BL gốc, TAN 9.6 và MV 11.8).", BODY))
     s.append(tbl(load("drawdown_summary.csv"), fs=8.5))
 
     s.append(Spacer(1, 0.4*cm))
@@ -393,7 +393,7 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 7. DISTRIBUTION TESTS – 6 PORTFOLIO
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "7. Kiểm định Phân phối Lợi nhuận – 6 Danh mục")
+    sec(s, "7. Kiểm định Phân phối Lợi nhuận – 7 Danh mục")
     sec(s, "7a. Jarque-Bera (Chuẩn hóa)", level=2)
     s.append(Paragraph(
         "H₀: lợi nhuận có phân phối chuẩn. p < 0.05 = bác bỏ H₀ "
@@ -447,7 +447,7 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 9. OOS RETURNS SERIES
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "9. Chuỗi Lợi nhuận OOS theo Tháng – 6 Danh mục (106 tháng)")
+    sec(s, "9. Chuỗi Lợi nhuận OOS theo Tháng – 7 Danh mục (106 tháng)")
     s.append(Paragraph(
         "Lợi nhuận tháng (simple return) của 6 danh mục và lãi suất phi rủi ro. "
         "Chuỗi này được dùng để tính toàn bộ các chỉ số hiệu suất.", BODY))
@@ -455,7 +455,7 @@ def build():
     dr = df_r.copy()
     for c in [col for col in dr.columns if col != "Date"]:
         dr[c] = dr[c].apply(lambda x: f"{x*100:+.3f}%" if pd.notna(x) else "")
-    cw_r = [3.2*cm] + [2.5*cm]*7
+    cw_r = [3.2*cm] + [2.3*cm]*8
     s.append(tbl(dr, cw=cw_r, fs=7.5))
 
     s.append(PageBreak())
@@ -480,10 +480,10 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 11. WEIGHTS HISTORY
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "11. Lịch sử Tỷ trọng Danh mục (6 Danh mục × 106 bước)")
+    sec(s, "11. Lịch sử Tỷ trọng Danh mục (7 Danh mục × 106 bước)")
     s.append(Paragraph(
-        "Tỷ trọng tại mỗi kỳ tái cân bằng cho từng cổ phiếu trong 6 danh mục. "
-        "Ràng buộc: 0 ≤ w ≤ 30%, Σw = 1 (áp dụng cho TAN, MV, BL, RP). "
+        "Tỷ trọng tại mỗi kỳ tái cân bằng cho từng cổ phiếu trong 7 danh mục. "
+        "Ràng buộc: 0 ≤ w ≤ 30%, Σw = 1 (áp dụng cho TAN, MV, BL, BL_KIO, RP). "
         "EW = 1/N (không ràng buộc per-asset, tự nhiên ≤ 1/N_min).", BODY))
     df_w = load("weights_v2.csv")
     s.append(Paragraph(f"Tổng quan sát: {len(df_w):,} dòng", SMALL))
@@ -510,12 +510,17 @@ def build():
          "với idio = ret − ew_market_ret; (2) −ann_vol = −std(log_ret[−36:]) × √12. "
          "Chuẩn hoá StandardScaler, K-means k=4, random_state=42, n_init=10. "
          "Composite score = idio_ret − ann_vol → xếp hạng best/worst cluster."),
-        ("Black-Litterman",
+        ("Black-Litterman gốc (BL)",
+         "Không có active views (P=∅, q=∅). Posterior đơn giản hóa: μ_BL = Π (equilibrium), "
+         "Σ_BL = (1+τ)·Σ. Tối ưu Tangency trên (Π, (1+τ)Σ). "
+         "Đây là BL chuẩn Black & Litterman (1992) không có quan điểm chủ quan."),
+        ("BL + K-means Signal (BL_KIO)",
          "Prior: Π = δ·Σ·w_mkt (Reverse-CAPM). δ = (w_mkt·μ − rf) / (w_mkt·Σ·w_mkt), clipped [0.5, 10]. "
          "View uncertainty: Ω = τ·P·Σ·Pᵀ + ε·I, τ = 1/36. "
-         "Posterior: M = (τΣ)⁻¹ + Pᵀ·Ω⁻¹·P; μ_BL = M⁻¹[(τΣ)⁻¹Π + Pᵀ·Ω⁻¹·q]; Σ_BL = M⁻¹ + Σ."),
+         "Posterior: M = (τΣ)⁻¹ + Pᵀ·Ω⁻¹·P; μ_BL_KIO = M⁻¹[(τΣ)⁻¹Π + Pᵀ·Ω⁻¹·q]; Σ_BL_KIO = M⁻¹ + Σ. "
+         "q = idiosyncratic momentum spread (best cluster − worst cluster)."),
         ("Tối ưu hoá",
-         "SLSQP maximise Sharpe(μ_BL, Σ_BL) subject to Σwᵢ=1, 0≤wᵢ≤0.30. "
+         "SLSQP maximise Sharpe(μ, Σ_post) subject to Σwᵢ=1, 0≤wᵢ≤0.30. "
          "10 điểm xuất phát ngẫu nhiên (Dirichlet), chọn nghiệm tốt nhất."),
         ("Monte Carlo",
          "2,000 mô phỏng nhiễu Gaussian trên q (delta ∈ {−10%,−5%,0%,+5%,+10%}). "

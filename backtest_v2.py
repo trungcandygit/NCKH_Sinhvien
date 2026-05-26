@@ -418,6 +418,17 @@ class PortfolioOptimiser:
         """Maximise Sharpe(μ_BL, Σ_BL)."""
         return self._solve(self._neg_sharpe, (mu_BL, Sigma_BL, rf), len(mu_BL))
 
+    def bl_equilibrium(self, Pi: np.ndarray, Sigma: np.ndarray,
+                       rf: float) -> np.ndarray:
+        """
+        Vanilla BL with NO active views.
+        Posterior simplifies to: μ = Π,  Σ_post = (1 + τ)·Σ
+        (the prior-uncertainty scalar τ inflates the covariance).
+        This is the Black-Litterman (1992) 'no-view' baseline.
+        """
+        Sigma_post = (1.0 + self.cfg.TAU) * Sigma
+        return self._solve(self._neg_sharpe, (Pi, Sigma_post, rf), len(Pi))
+
     def equal_weight(self, n: int) -> np.ndarray:
         """
         Naive 1/N portfolio.
@@ -723,9 +734,9 @@ class Backtester:
             print(f"Date range : {dates[0].date()} → {dates[-1].date()}")
             print(f"Lookback   : {L} months\n")
             hdr = f"{'Date':<12} {'N':>3}  {'MKT':>7}  {'TAN':>7}  {'MV':>7}  "
-            hdr += f"{'BL':>7}  {'EW':>7}  {'RP':>7}  {'rf%':>5}"
+            hdr += f"{'BL':>7}  {'BL_KIO':>7}  {'EW':>7}  {'RP':>7}  {'rf%':>5}"
             print(hdr)
-            print("-" * 72)
+            print("-" * 80)
 
         for i in range(L, len(dates) - 1):
 
@@ -770,25 +781,27 @@ class Backtester:
             mu_BL, Sigma_BL, A_mat, base_vec = self.bl_eng.posterior(Pi, Sigma, P, q)
 
             # ── Portfolio optimisation ────────────────────────────────────
-            w_TAN = self.optim.tangency(mu_hist, Sigma, rf_a_train)
-            w_MV  = self.optim.min_variance(Sigma)
-            w_BL  = self.optim.bl_tangency(mu_BL, Sigma_BL, rf_a_train)
-            w_EW  = self.optim.equal_weight(n)
-            w_RP  = self.optim.risk_parity(Sigma)
+            w_TAN    = self.optim.tangency(mu_hist, Sigma, rf_a_train)
+            w_MV     = self.optim.min_variance(Sigma)
+            w_BL     = self.optim.bl_equilibrium(Pi, Sigma, rf_a_train)   # vanilla BL (no views)
+            w_BL_KIO = self.optim.bl_tangency(mu_BL, Sigma_BL, rf_a_train)  # BL + K-means idio signal
+            w_EW     = self.optim.equal_weight(n)
+            w_RP     = self.optim.risk_parity(Sigma)
 
             # ── OOS simple returns ─────────────────────────────────────────
-            r_mkt = float(w_mkt @ oos_r)
-            r_TAN = float(w_TAN @ oos_r)
-            r_MV  = float(w_MV  @ oos_r)
-            r_BL  = float(w_BL  @ oos_r)
-            r_EW  = float(w_EW  @ oos_r)
-            r_RP  = float(w_RP  @ oos_r)
+            r_mkt    = float(w_mkt    @ oos_r)
+            r_TAN    = float(w_TAN    @ oos_r)
+            r_MV     = float(w_MV     @ oos_r)
+            r_BL     = float(w_BL     @ oos_r)
+            r_BL_KIO = float(w_BL_KIO @ oos_r)
+            r_EW     = float(w_EW     @ oos_r)
+            r_RP     = float(w_RP     @ oos_r)
 
             # ── Store OOS returns ──────────────────────────────────────────
             self._oos.append(dict(
                 Date=oos_date, RF_monthly=rf_m_oos,
                 MKT=r_mkt, TAN=r_TAN, MV=r_MV,
-                BL=r_BL,   EW=r_EW,   RP=r_RP,
+                BL=r_BL, BL_KIO=r_BL_KIO, EW=r_EW, RP=r_RP,
             ))
 
             # ── Signal IC (rank-correlation of idio signal vs realised return)
@@ -809,7 +822,8 @@ class Backtester:
                 self._weights.append(dict(
                     Date=oos_date, Ticker=t,
                     w_mkt=w_mkt[j], w_TAN=w_TAN[j], w_MV=w_MV[j],
-                    w_BL=w_BL[j],   w_EW=w_EW[j],   w_RP=w_RP[j],
+                    w_BL=w_BL[j],   w_BL_KIO=w_BL_KIO[j],
+                    w_EW=w_EW[j],   w_RP=w_RP[j],
                 ))
                 self._clusters.append(dict(
                     Date=oos_date, Ticker=t,
@@ -818,7 +832,7 @@ class Backtester:
                 ))
 
             # ── Monte Carlo sensitivity ────────────────────────────────────
-            for row in self.mc_eng.run(w_BL, w_TAN, mu_hist, Sigma, Sigma_BL,
+            for row in self.mc_eng.run(w_BL_KIO, w_TAN, mu_hist, Sigma, Sigma_BL,
                                        q, A_mat, base_vec, rf_a_train):
                 self._mc_rows.append(dict(
                     Date=oos_date,
@@ -830,8 +844,8 @@ class Backtester:
             if self.verbose:
                 print(f"{str(oos_date.date()):<12} {n:>3}  "
                       f"{r_mkt:>+7.4f}  {r_TAN:>+7.4f}  {r_MV:>+7.4f}  "
-                      f"{r_BL:>+7.4f}  {r_EW:>+7.4f}  {r_RP:>+7.4f}  "
-                      f"{rf_m_oos*100:>4.2f}%")
+                      f"{r_BL:>+7.4f}  {r_BL_KIO:>+7.4f}  {r_EW:>+7.4f}  "
+                      f"{r_RP:>+7.4f}  {rf_m_oos*100:>4.2f}%")
 
         if self.verbose:
             print()
@@ -846,7 +860,7 @@ class Backtester:
         out = self.cfg.OUTPUT_DIR
         os.makedirs(out, exist_ok=True)
 
-        PORTS = ["MKT", "TAN", "MV", "BL", "EW", "RP"]
+        PORTS = ["MKT", "TAN", "MV", "BL", "BL_KIO", "EW", "RP"]
 
         df_w = pd.DataFrame(self._weights)
         df_c = pd.DataFrame(self._clusters)
@@ -875,14 +889,14 @@ class Backtester:
         df_perf.to_csv(f"{out}/performance_summary_v2.csv", index=False)
 
         # ── 6. ttest_results_v2.csv ───────────────────────────────────────
-        bl_r = df_idx["BL"]
-        ttest_rows = [self.perf.ttest(bl_r, df_idx[p], f"BL vs {p}")
-                      for p in ["MKT", "TAN", "MV", "EW", "RP"]]
+        bl_kio_r = df_idx["BL_KIO"]
+        ttest_rows = [self.perf.ttest(bl_kio_r, df_idx[p], f"BL_KIO vs {p}")
+                      for p in ["MKT", "TAN", "MV", "BL", "EW", "RP"]]
         pd.DataFrame(ttest_rows).to_csv(f"{out}/ttest_results_v2.csv", index=False)
 
         # ── 7. jobson_korkie_results.csv ──────────────────────────────────
-        jk_rows = [self.perf.jobson_korkie(bl_r, df_idx[p], rf_s, f"BL vs {p}")
-                   for p in ["MKT", "TAN", "MV", "EW", "RP"]]
+        jk_rows = [self.perf.jobson_korkie(bl_kio_r, df_idx[p], rf_s, f"BL_KIO vs {p}")
+                   for p in ["MKT", "TAN", "MV", "BL", "EW", "RP"]]
         df_jk = pd.DataFrame(jk_rows)
         df_jk.to_csv(f"{out}/jobson_korkie_results.csv", index=False)
 
@@ -955,7 +969,7 @@ class Backtester:
         print(df_perf.to_string(index=False, float_format=lambda x: f"{x:+.4f}"))
 
         print("\n" + "=" * 90)
-        print("JOBSON-KORKIE TEST  (H₀: SR_BL = SR_other,  two-sided)")
+        print("JOBSON-KORKIE TEST  (H₀: SR_BL_KIO = SR_other,  two-sided)")
         print("=" * 90)
         print(df_jk.to_string(index=False))
 
@@ -987,7 +1001,7 @@ class Backtester:
 if __name__ == "__main__":
     print("=" * 90)
     print("  Vietnamese Bank Stocks – Portfolio Backtest v2")
-    print("  6 portfolios: MKT · TAN · MV · BL · EW · RP")
+    print("  7 portfolios: MKT · TAN · MV · BL · BL_KIO · EW · RP")
     print("  Risk-free: time-varying VN10Y/12")
     print("=" * 90 + "\n")
     Backtester(Config()).run()

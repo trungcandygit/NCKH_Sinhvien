@@ -104,20 +104,22 @@ class FastBacktester:
             Pi    = delta * Sigma @ w_mkt
             mu_BL, Sigma_BL, _, _ = self.bl_eng.posterior(Pi, Sigma, P, q)
 
-            w_TAN = self.optim.tangency(mu_hist, Sigma, rf_a_train)
-            w_MV  = self.optim.min_variance(Sigma)
-            w_BL  = self.optim.bl_tangency(mu_BL, Sigma_BL, rf_a_train)
-            w_EW  = self.optim.equal_weight(n)
-            w_RP  = self.optim.risk_parity(Sigma)
+            w_TAN    = self.optim.tangency(mu_hist, Sigma, rf_a_train)
+            w_MV     = self.optim.min_variance(Sigma)
+            w_BL     = self.optim.bl_equilibrium(Pi, Sigma, rf_a_train)
+            w_BL_KIO = self.optim.bl_tangency(mu_BL, Sigma_BL, rf_a_train)
+            w_EW     = self.optim.equal_weight(n)
+            w_RP     = self.optim.risk_parity(Sigma)
 
             oos_rows.append(dict(
                 Date=oos_date, RF_monthly=rf_m_oos,
-                MKT=float(w_mkt @ oos_r),
-                TAN=float(w_TAN @ oos_r),
-                MV =float(w_MV  @ oos_r),
-                BL =float(w_BL  @ oos_r),
-                EW =float(w_EW  @ oos_r),
-                RP =float(w_RP  @ oos_r),
+                MKT=float(w_mkt    @ oos_r),
+                TAN=float(w_TAN    @ oos_r),
+                MV =float(w_MV     @ oos_r),
+                BL =float(w_BL     @ oos_r),
+                BL_KIO=float(w_BL_KIO @ oos_r),
+                EW =float(w_EW     @ oos_r),
+                RP =float(w_RP     @ oos_r),
             ))
 
         if not oos_rows:
@@ -129,7 +131,7 @@ class FastBacktester:
 
         return {
             p: self.perf.compute(df_idx[p], rf_s, p)
-            for p in ["MKT", "TAN", "MV", "BL", "EW", "RP"]
+            for p in ["MKT", "TAN", "MV", "BL", "BL_KIO", "EW", "RP"]
         }
 
 
@@ -215,9 +217,9 @@ def run_sensitivity() -> pd.DataFrame:
                 print("  (skipped – too few OOS months)")
                 continue
 
-            bl_sharpe = results["BL"]["Sharpe"]
-            ew_sharpe = results["EW"]["Sharpe"]
-            print(f"BL Sharpe={bl_sharpe:+.4f}  EW Sharpe={ew_sharpe:+.4f}")
+            bl_kio_sharpe = results["BL_KIO"]["Sharpe"]
+            ew_sharpe     = results["EW"]["Sharpe"]
+            print(f"BL_KIO Sharpe={bl_kio_sharpe:+.4f}  EW Sharpe={ew_sharpe:+.4f}")
 
             for port, metrics in results.items():
                 records.append(dict(
@@ -241,12 +243,12 @@ def run_sensitivity() -> pd.DataFrame:
     print(f"\n{'='*60}")
     print(f"  Saved: output/sensitivity_results.csv  ({len(df):,} rows)")
 
-    # ── Summary pivot: BL Sharpe across each parameter ───────────────────
-    print("\n  BL Sharpe ratio by parameter value:")
+    # ── Summary pivot: BL_KIO Sharpe across each parameter ───────────────
+    print("\n  BL_KIO Sharpe ratio by parameter value:")
     print("  (asterisk = baseline)\n")
-    bl = df[df["Portfolio"] == "BL"].copy()
+    bl_kio = df[df["Portfolio"] == "BL_KIO"].copy()
     for param, values, baseline in PARAM_GRID:
-        sub = bl[bl["Parameter"] == param][["Value", "Is_Baseline", "Sharpe"]]
+        sub = bl_kio[bl_kio["Parameter"] == param][["Value", "Is_Baseline", "Sharpe"]]
         print(f"  {param}:")
         for _, row in sub.iterrows():
             marker = " *" if row["Is_Baseline"] else "  "
