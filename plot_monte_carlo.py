@@ -1,7 +1,6 @@
 """
-Monte Carlo Sharpe Distribution Plot
-Phong cach: Bertsimas, Gupta & Paschalidis (2012) - INFORMS
-Hai subplot: BL-KIO va TAN, 5 muc delta
+Monte Carlo Sharpe Distribution
+Style: Bertsimas, Gupta & Paschalidis (2012) - Operations Research / MATLAB
 """
 
 import pandas as pd
@@ -9,78 +8,117 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from scipy.stats import gaussian_kde
 
-# ── Load data ──────────────────────────────────────────────────────────────
-df = pd.read_csv("output/monte_carlo_v2.csv")
-deltas   = sorted(df["Delta_Noise"].unique())   # [-0.1, -0.05, 0.0, 0.05, 0.1]
+# ── Matplotlib giong MATLAB ────────────────────────────────────────────────
+plt.rcParams.update({
+    "font.family":        "DejaVu Sans",
+    "font.size":          9,
+    "axes.linewidth":     0.8,
+    "axes.edgecolor":     "black",
+    "xtick.direction":    "in",
+    "ytick.direction":    "in",
+    "xtick.major.size":   4,
+    "ytick.major.size":   4,
+    "xtick.minor.visible": False,
+    "ytick.minor.visible": False,
+    "grid.linestyle":     ":",
+    "grid.linewidth":     0.6,
+    "grid.color":         "#aaaaaa",
+    "legend.frameon":     True,
+    "legend.edgecolor":   "black",
+    "legend.fancybox":    False,
+    "legend.fontsize":    8,
+})
 
-# ── Style: B&W voi marker nhu hinh mau ────────────────────────────────────
-STYLES = {
-    -0.10: dict(color="black",    linestyle="-",  marker="^", label=r"$\delta = -10\%$"),
-    -0.05: dict(color="black",    linestyle="--", marker="o", label=r"$\delta = -5\%$"),
-     0.00: dict(color="black",    linestyle="-.", marker="s", label=r"$\delta = 0$"   ),
-     0.05: dict(color="dimgray",  linestyle=":",  marker="D", label=r"$\delta = +5\%$"),
-     0.10: dict(color="dimgray",  linestyle="-",  marker="*", label=r"$\delta = +10\%$"),
-}
+# ── Data ───────────────────────────────────────────────────────────────────
+df     = pd.read_csv("output/monte_carlo_v2.csv")
+deltas = sorted(df["Delta_Noise"].unique())
 
-MARK_EVERY = 40   # marker spacing tren duong KDE
-LW         = 1.4
-MS         = 5    # marker size
-
-fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
-fig.subplots_adjust(wspace=0.35)
-
-PANELS = [
-    ("Sharpe_BL_KIO", "BL-KIO (K-means Signal)", axes[0]),
-    ("Sharpe_TAN",    "TAN (Tangency)",           axes[1]),
-]
-
-for col, title, ax in PANELS:
-    for delta in deltas:
-        sub  = df[df["Delta_Noise"] == delta][col].dropna().values
-        kde  = gaussian_kde(sub, bw_method="scott")
-        x    = np.linspace(sub.min() - 0.2, sub.max() + 0.2, 500)
-        y    = kde(x)
-        st   = STYLES[round(delta, 2)]
-
-        ax.plot(x, y,
-                color=st["color"], linestyle=st["linestyle"],
-                linewidth=LW, label=st["label"])
-
-        # Marker trai deu tren duong
-        idx = np.linspace(0, len(x)-1, MARK_EVERY, dtype=int)
-        ax.plot(x[idx], y[idx],
-                color=st["color"], marker=st["marker"],
-                markersize=MS, linestyle="None",
-                markerfacecolor="white", markeredgewidth=1.2)
-
-    ax.set_xlabel("Tỷ lệ Sharpe (năm hoá)", fontsize=10)
-    ax.set_ylabel("Mật độ xấp xỉ", fontsize=10)
-    ax.set_title(title, fontsize=11, fontweight="bold")
-    ax.tick_params(labelsize=9)
-    ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.7)
-
-    # Vertical line: baseline (delta=0)
-    base = df[df["Delta_Noise"] == 0.0][col].mean()
-    ax.axvline(base, color="gray", linestyle="--", linewidth=0.9, alpha=0.6)
-
-# Legend chung o axes[1]
-handles, labels = axes[0].get_legend_handles_labels()
-fig.legend(handles, labels,
-           loc="upper center", ncol=5,
-           fontsize=8.5, frameon=True,
-           bbox_to_anchor=(0.5, 1.02),
-           handlelength=2.5)
-
-fig.suptitle(
-    "Hình X. Phân phối Tỷ lệ Sharpe theo mức nhiễu tín hiệu δ\n"
-    "(Mô phỏng Monte Carlo, B = 2.000 lần, 5 mức δ)",
-    fontsize=10, y=1.08
+# TAN la scalar moi delta → tinh excess Sharpe (BL_KIO - TAN)
+tan_scalar = df.groupby("Delta_Noise")["Sharpe_TAN"].mean().to_dict()
+df["Excess_Sharpe"] = df.apply(
+    lambda r: r["Sharpe_BL_KIO"] - tan_scalar[r["Delta_Noise"]], axis=1
 )
 
-plt.tight_layout()
+# ── Style cho 5 delta ─────────────────────────────────────────────────────
+#   giong mau: duong dam + marker day dac
+CONFIGS = {
+    -0.10: dict(ls="-",  marker="^", lw=1.2, ms=4.5, label=r"$\delta\!=\!-10\%$"),
+    -0.05: dict(ls="--", marker="o", lw=1.2, ms=4.5, label=r"$\delta\!=\!-5\%$" ),
+     0.00: dict(ls="-",  marker="s", lw=1.6, ms=5.0, label=r"$\delta\!=\!0$"    ),
+     0.05: dict(ls="--", marker="D", lw=1.2, ms=4.0, label=r"$\delta\!=\!+5\%$" ),
+     0.10: dict(ls="-",  marker="*", lw=1.2, ms=6.0, label=r"$\delta\!=\!+10\%$"),
+}
+COLORS = {
+    -0.10: "black",
+    -0.05: "black",
+     0.00: "black",
+     0.05: "dimgray",
+     0.10: "dimgray",
+}
+
+N_KDE    = 600    # so diem KDE
+MARK_N   = 70     # so marker tren moi duong (day dac nhu MATLAB)
+
+# ── Figure ─────────────────────────────────────────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.2))
+fig.subplots_adjust(wspace=0.38, top=0.82)
+
+PANELS = [
+    ("Sharpe_BL_KIO",  "Approximate density of BL-KIO Sharpe",
+     "Tỷ lệ Sharpe (năm hoá) — BL-KIO"),
+    ("Excess_Sharpe",  "Approximate density of Excess Sharpe (BL-KIO − TAN)",
+     "Tỷ lệ Sharpe vượt trội so với TAN"),
+]
+
+for (col, title, xlabel), ax in zip(PANELS, axes):
+    ax.grid(True, zorder=0)
+
+    for delta in deltas:
+        d   = round(float(delta), 2)
+        sub = df[df["Delta_Noise"] == delta][col].dropna().values
+        kde = gaussian_kde(sub, bw_method=0.28)   # bw nho = peak cao nhu MATLAB
+        x   = np.linspace(sub.min() - 0.15, sub.max() + 0.15, N_KDE)
+        y   = kde(x)
+
+        cfg = CONFIGS[d]
+        col_c = COLORS[d]
+
+        # Ve duong KDE
+        ax.plot(x, y,
+                color=col_c, linestyle=cfg["ls"], linewidth=cfg["lw"],
+                zorder=3, label="_nolegend_")
+
+        # Marker day dac (giong MATLAB: phu kin duong)
+        idx = np.round(np.linspace(20, N_KDE - 20, MARK_N)).astype(int)
+        ax.plot(x[idx], y[idx],
+                color=col_c, marker=cfg["marker"],
+                markersize=cfg["ms"], linestyle="None",
+                markerfacecolor="white", markeredgewidth=1.2,
+                zorder=4, label=cfg["label"])
+
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.set_ylabel("Mật độ xấp xỉ", fontsize=9)
+    ax.set_title(title, fontsize=9.5, pad=6)
+    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
+
+    # Legend trong o (upper right — y nhu hinh mau)
+    handles = [h for h in ax.get_legend_handles_labels()[0]
+               if not isinstance(h, matplotlib.lines.Line2D) or h.get_marker() != "None"]
+    labels  = [l for h, l in zip(*ax.get_legend_handles_labels())
+               if l != "_nolegend_"]
+    ax.legend(handles=handles, labels=labels,
+              loc="upper right", handlelength=2.0,
+              handletextpad=0.5, borderpad=0.6)
+
+fig.suptitle(
+    "Hình X.  Phân phối Tỷ lệ Sharpe theo mức nhiễu tín hiệu δ\n"
+    "(Monte Carlo, B = 2.000 lần lặp, 5 mức δ ∈ {−10%, −5%, 0, +5%, +10%})",
+    fontsize=9.5, y=0.98
+)
+
 plt.savefig("output/monte_carlo_density.png",
-            dpi=180, bbox_inches="tight",
-            facecolor="white")
+            dpi=200, bbox_inches="tight", facecolor="white")
 print("Saved: output/monte_carlo_density.png")
