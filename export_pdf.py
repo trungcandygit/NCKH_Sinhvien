@@ -188,16 +188,14 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 1. HIỆU SUẤT ĐẦY ĐỦ – 6 danh mục
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "1. Tóm tắt Hiệu suất – 7 Danh mục (OOS 106 tháng, annualised)")
+    sec(s, "1. Tóm tắt Hiệu suất – 5 Danh mục (OOS 106 tháng, annualised)")
     src(s, "performance_summary_v2.csv")
     s.append(Paragraph(
-        "So sánh toàn diện 7 danh mục đầu tư trên 7 chỉ số. "
+        "So sánh toàn diện 5 danh mục đầu tư trên 7 chỉ số. "
         "MKT = Market-cap weighted; TAN = Tangency (max-Sharpe lịch sử); "
-        "MV = Min-Variance; "
         "BL = Black-Litterman gốc (không có views – chỉ dùng equilibrium Π, μ_BL=Π); "
-        "BL_KIO = BL + K-means Idiosyncratic + low-vol signal (mô hình đề xuất); "
         "EW = Equal-Weight 1/N (benchmark DeMiguel et al. 2009); "
-        "RP = Risk-Parity (inverse-vol). "
+        "BL_KIO = BL + K-means Idiosyncratic + low-vol signal (mô hình đề xuất). "
         "Lãi suất phi rủi ro = VN10Y/12 (time-varying).", BODY))
     df_p = load("performance_summary_v2.csv")
     # format nicely
@@ -213,7 +211,7 @@ def build():
     s.append(Spacer(1, 0.4*cm))
 
     # 1b. Paired t-test
-    sec(s, "1b. Kiểm định t-test theo cặp (BL_KIO vs 6 danh mục còn lại)", level=2)
+    sec(s, "1b. Kiểm định t-test theo cặp (BL_KIO vs 4 danh mục còn lại)", level=2)
     src(s, "ttest_results_v2.csv", "oos_returns_v2.csv")
     s.append(Paragraph(
         "H₀: E[r_BL_KIO] = E[r_other] (paired t-test trên lợi nhuận tháng OOS). "
@@ -231,7 +229,7 @@ def build():
         "H₀: SR_BL_KIO = SR_other (two-sided). "
         "z > 0: BL_KIO có Sharpe cao hơn. "
         "p < 0.05: sự khác biệt Sharpe có ý nghĩa thống kê. "
-        "Lưu ý: BL_KIO vs MV có p = 0.020 (significant ★).", BODY))
+        "Lưu ý: BL_KIO vs TAN có p = 0.052 (gần ngưỡng 5%).", BODY))
     df_jk = load("jobson_korkie_results.csv")
     djk = df_jk.copy()
     djk["z_statistic"] = djk["z_statistic"].apply(lambda x: f"{x:.4f}")
@@ -245,13 +243,13 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 2. SUB-PERIOD – TẤT CẢ 6 PORTFOLIO × 3 GIAI ĐOẠN
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "2. Phân tích Tính vững theo Giai đoạn (21 dòng = 7 portfolio × 3 giai đoạn)")
+    sec(s, "2. Phân tích Tính vững theo Giai đoạn (15 dòng = 5 portfolio × 3 giai đoạn)")
     src(s, "subperiod_analysis.csv")
     s.append(Paragraph(
         "Giai đoạn OOS chia làm 2 nửa bằng nhau (mỗi nửa ~53 tháng). "
         "Period 1 (08/2017–12/2021): thị trường bull, tăng trưởng mạnh. "
         "Period 2 (01/2022–05/2026): biến động cao, lãi suất tăng, hậu COVID. "
-        "BL_KIO thống trị Period 2 (Sharpe 0.861 vs BL gốc 0.518, EW 0.384, TAN 0.043, MV −0.097), "
+        "BL_KIO thống trị Period 2 (Sharpe 0.861 vs BL gốc 0.518, EW 0.384, TAN 0.043), "
         "chứng minh K-means signal thêm giá trị thực sự (+0.343 Sharpe) so với BL gốc.", BODY))
     df_sp = load("subperiod_analysis.csv")
 
@@ -275,12 +273,12 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 3. SENSITIVITY – TẤT CẢ 6 PORTFOLIO
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "3. Phân tích Độ nhạy Tham số (One-at-a-time) – 7 Danh mục")
+    sec(s, "3. Phân tích Độ nhạy Tham số (One-at-a-time) – 5 Danh mục")
     src(s, "sensitivity_results.csv")
     s.append(Paragraph(
         "Thay đổi một tham số tại một thời điểm, giữ nguyên các tham số còn lại "
         "(baseline: lookback=36, max_weight=30%, k=4, rf=VN10Y dynamic). "
-        "Mỗi bảng hiển thị Sharpe của tất cả 7 danh mục để so sánh trực tiếp. "
+        "Mỗi bảng hiển thị Sharpe của tất cả 5 danh mục để so sánh trực tiếp. "
         "★ = baseline value.", BODY))
 
     df_s = load("sensitivity_results.csv")
@@ -298,7 +296,7 @@ def build():
             lambda x: "★" if (x == True or x == 1 or str(x)=="True") else "")
         pivot = pivot.rename(columns={"Value": "Tham số", "Is_Baseline": "Baseline"})
         # Reorder portfolio columns
-        port_cols = [c for c in ["MKT","TAN","MV","BL","BL_KIO","EW","RP"] if c in pivot.columns]
+        port_cols = [c for c in ["MKT","TAN","BL","BL_KIO","EW"] if c in pivot.columns]
         disp = pivot[["Tham số","Baseline"] + port_cols].copy()
         for c in port_cols:
             disp[c] = disp[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
@@ -362,7 +360,7 @@ def build():
     k_pivot["Is_Baseline"] = k_pivot["Is_Baseline"].apply(
         lambda x: "★" if (x==True or x==1 or str(x)=="True") else "")
     k_pivot = k_pivot.rename(columns={"Value":"k","Is_Baseline":"Baseline"})
-    pcols = [c for c in ["MKT","TAN","MV","BL","BL_KIO","EW","RP"] if c in k_pivot.columns]
+    pcols = [c for c in ["MKT","TAN","BL","BL_KIO","EW"] if c in k_pivot.columns]
     kd = k_pivot[["k","Baseline"]+pcols].copy()
     for c in pcols:
         kd[c] = kd[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
@@ -497,13 +495,13 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 6. DRAWDOWN – TẤT CẢ 6 PORTFOLIO
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "6. Phân tích Drawdown Chi tiết – 7 Danh mục")
+    sec(s, "6. Phân tích Drawdown Chi tiết – 5 Danh mục")
     src(s, "drawdown_summary.csv", "drawdown_periods.csv")
     sec(s, "6a. Tóm tắt Drawdown", level=2)
     s.append(Paragraph(
         "BL_KIO có Max_DD thấp nhất trong các danh mục tối ưu hóa (-30.7%). "
         "Avg_DD_Depth = -9.48% (nhỏ hơn nhiều so với TAN -24.9% và EW -15.4%). "
-        "Avg_Recovery_Months BL_KIO = 3.8 (nhanh hơn BL gốc, TAN 9.6 và MV 11.8).", BODY))
+        "Avg_Recovery_Months BL_KIO = 3.8 (nhanh hơn BL gốc 6.8, TAN 9.6 và EW 9.0).", BODY))
     s.append(tbl(load("drawdown_summary.csv"), fs=8.5))
 
     s.append(Spacer(1, 0.4*cm))
@@ -518,7 +516,7 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 7. DISTRIBUTION TESTS – 6 PORTFOLIO
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "7. Kiểm định Phân phối Lợi nhuận – 7 Danh mục")
+    sec(s, "7. Kiểm định Phân phối Lợi nhuận – 5 Danh mục")
     src(s, "distribution_jb_tests.csv", "distribution_lb_tests.csv")
     sec(s, "7a. Jarque-Bera (Chuẩn hóa)", level=2)
     s.append(Paragraph(
@@ -600,10 +598,10 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 9. OOS RETURNS SERIES
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "9. Chuỗi Lợi nhuận OOS theo Tháng – 7 Danh mục (106 tháng)")
+    sec(s, "9. Chuỗi Lợi nhuận OOS theo Tháng – 5 Danh mục (106 tháng)")
     src(s, "oos_returns_v2.csv")
     s.append(Paragraph(
-        "Lợi nhuận tháng (simple return) của 7 danh mục và lãi suất phi rủi ro VN10Y/12. "
+        "Lợi nhuận tháng (simple return) của 5 danh mục và lãi suất phi rủi ro VN10Y/12. "
         "Chuỗi này là dữ liệu gốc để tính toàn bộ các chỉ số hiệu suất ở các bảng trên.", BODY))
     df_r = load("oos_returns_v2.csv")
     dr = df_r.copy()
@@ -635,11 +633,11 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 11. WEIGHTS HISTORY
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "11. Lịch sử Tỷ trọng Danh mục (7 Danh mục × 106 bước)")
+    sec(s, "11. Lịch sử Tỷ trọng Danh mục (5 Danh mục × 106 bước)")
     src(s, "weights_v2.csv")
     s.append(Paragraph(
-        "Tỷ trọng tại mỗi kỳ tái cân bằng cho từng cổ phiếu trong 7 danh mục. "
-        "Ràng buộc: 0 ≤ w ≤ 30%, Σw = 1 (áp dụng cho TAN, MV, BL, BL_KIO, RP). "
+        "Tỷ trọng tại mỗi kỳ tái cân bằng cho từng cổ phiếu trong 5 danh mục. "
+        "Ràng buộc: 0 ≤ w ≤ 30%, Σw = 1 (áp dụng cho TAN, BL, BL_KIO). "
         "EW = 1/N (không ràng buộc per-asset, tự nhiên ≤ 1/N_min).", BODY))
     df_w = load("weights_v2.csv")
     s.append(Paragraph(f"Tổng quan sát: {len(df_w):,} dòng", SMALL))
@@ -653,7 +651,7 @@ def build():
     # PHỤ LỤC A – PHƯƠNG PHÁP LUẬN
     # ─────────────────────────────────────────────────────────────────────────
     sec(s, "Phụ lục A – Phương pháp luận Chi tiết")
-    src(s, "backtest_v2.py")
+    src(s, "backtest.py")
     method = [
         ("Dữ liệu",
          "25 cổ phiếu ngân hàng niêm yết HOSE/HNX. Giá đóng cửa tháng và vốn hoá "
@@ -705,7 +703,7 @@ def build():
     # PHỤ LỤC B – LÃI SUẤT PHI RỦI RO
     # ─────────────────────────────────────────────────────────────────────────
     sec(s, "Phụ lục B – Lãi suất Phi rủi ro VN10Y theo Năm")
-    src(s, "backtest_v2.py  (VN10Y_RATES dict)")
+    src(s, "config.py  (VN10Y_RATES dict)")
     s.append(Paragraph(
         "Lãi suất trái phiếu chính phủ Việt Nam kỳ hạn 10 năm (VN10Y). "
         "RF tháng = VN10Y_năm / 100 / 12.", BODY))
