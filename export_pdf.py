@@ -448,11 +448,20 @@ def build():
         "cho phép 2,000 mô phỏng mà không cần tối ưu lại. "
         "BL_KIO và TAN đều ổn định qua dải nhiễu.", BODY))
     df_mc = load("monte_carlo_v2.csv")
-    mc_p = (df_mc.groupby(["Delta_Noise","Port_Type"])["Expected_Sharpe"]
-            .agg(Mean=("mean"), Std=("std"), Min=("min"), Max=("max"))
-            .round(4).reset_index())
-    mc_p.columns = ["Delta_Noise","Danh mục","Mean Sharpe","Std","Min","Max"]
-    s.append(tbl(mc_p, cw=[3.5*cm,3*cm,4*cm,3*cm,3*cm,3*cm], fs=8.5))
+    # Summarise the full 2000-sim distribution per delta level
+    bl_grp = df_mc.groupby("Delta_Noise")["Sharpe_BL_KIO"].agg(
+        N="count", Mean="mean", Std="std", Min="min",
+        Pct5=lambda x: x.quantile(0.05), Pct95=lambda x: x.quantile(0.95), Max="max"
+    ).round(4).reset_index()
+    tan_grp = df_mc.groupby("Delta_Noise")["Sharpe_TAN"].agg(Mean="mean").round(4).reset_index()
+    bl_grp["Sharpe_TAN_mean"] = tan_grp["Mean"].values
+    bl_grp = bl_grp.rename(columns={
+        "Delta_Noise": "Delta", "N": "N_sims",
+        "Mean": "BL_KIO Mean", "Std": "BL_KIO Std",
+        "Min": "BL_KIO Min", "Pct5": "BL_KIO 5%", "Pct95": "BL_KIO 95%",
+        "Max": "BL_KIO Max", "Sharpe_TAN_mean": "TAN Mean"
+    })
+    s.append(tbl(bl_grp, fs=8))
 
     s.append(PageBreak())
 

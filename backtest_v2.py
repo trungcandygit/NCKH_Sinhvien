@@ -459,9 +459,12 @@ class PortfolioOptimiser:
 
 class MonteCarloEngine:
     """
-    Sensitivity of BL-portfolio Sharpe to view-specification errors.
+    Sensitivity of BL_KIO-portfolio Sharpe to view-specification errors.
     Exploits the linear structure  μ_BL(q') = base_vec + A_mat @ q'
-    to evaluate all 2000 simulations via a single matrix multiply.
+    to evaluate all N_MC_SIMS simulations via a single matrix multiply.
+
+    Returns the full array of N simulated Sharpes per delta level so the
+    caller can accumulate distributions across rolling-window steps.
     """
 
     def __init__(self, cfg: Config):
@@ -469,6 +472,11 @@ class MonteCarloEngine:
 
     def run(self, w_BL, w_TAN, mu_hist, Sigma, Sigma_BL,
             q, A_mat, base_vec, rf_annual: float) -> list:
+        """
+        Returns list of (delta_pct, sharpe_BL_arr, sharpe_TAN_scalar) tuples.
+        sharpe_BL_arr has shape (N_MC_SIMS,) — all individual simulation values.
+        sharpe_TAN_scalar is a float (TAN is deterministic given the training data).
+        """
         if self.cfg.N_MC_SIMS == 0:
             return []
 
@@ -479,21 +487,16 @@ class MonteCarloEngine:
         var_TAN    = float(w_TAN @ Sigma    @ w_TAN)
         sharpe_TAN = (float(w_TAN @ mu_hist) - rf_annual) / np.sqrt(max(var_TAN, 1e-12))
 
-        records = []
+        results = []
         for delta_pct in self.cfg.MC_DELTAS:
-            noise_std = max(abs(delta_pct), 0.01) * np.abs(q)       # (K,)
-            noise_mat = rng.normal(0.0, noise_std, size=(N, len(q))) # (N, K)
-            q_mat     = q + noise_mat                                 # (N, K)
-
-            mu_BL_mat     = base_vec + (A_mat @ q_mat.T).T           # (N, n)
-            ret_BL_sim    = mu_BL_mat @ w_BL                         # (N,)
+            noise_std     = max(abs(delta_pct), 0.01) * np.abs(q)        # (K,)
+            noise_mat     = rng.normal(0.0, noise_std, size=(N, len(q))) # (N, K)
+            q_mat         = q + noise_mat                                  # (N, K)
+            mu_BL_mat     = base_vec + (A_mat @ q_mat.T).T               # (N, n)
+            ret_BL_sim    = mu_BL_mat @ w_BL                              # (N,)
             sharpe_BL_sim = (ret_BL_sim - rf_annual) / np.sqrt(max(var_BL, 1e-12))
-
-            records.append(dict(delta=delta_pct, port_type="BL",
-                                expected_sharpe=float(sharpe_BL_sim.mean())))
-            records.append(dict(delta=delta_pct, port_type="TAN",
-                                expected_sharpe=sharpe_TAN))
-        return records
+            results.append((delta_pct, sharpe_BL_sim, sharpe_TAN))       # full array
+        return results
 
 
 # =============================================================================
@@ -718,8 +721,11 @@ class Backtester:
         self._weights  : list = []
         self._oos      : list = []
         self._clusters : list = []
-        self._mc_rows  : list = []
         self._ic_rows  : list = []   # per-step IC for signal robustness analysis
+        # MC accumulators: delta_pct -> cumulative Sharpe arrays over OOS steps
+        self._mc_bl_sums  : dict = {}   # delta -> np.ndarray(N_MC_SIMS,)
+        self._mc_tan_sums : dict = {}   # delta -> float
+        self._mc_nsteps   : int  = 0
 
     # ── Main rolling loop ────────────────────────────────────────────────
 
@@ -832,14 +838,16 @@ class Backtester:
                 ))
 
             # ── Monte Carlo sensitivity ────────────────────────────────────
-            for row in self.mc_eng.run(w_BL_KIO, w_TAN, mu_hist, Sigma, Sigma_BL,
-                                       q, A_mat, base_vec, rf_a_train):
-                self._mc_rows.append(dict(
-                    Date=oos_date,
-                    Delta_Noise=row["delta"],
-                    Port_Type=row["port_type"],
-                    Expected_Sharpe=row["expected_sharpe"],
-                ))
+            mc_result = self.mc_eng.run(w_BL_KIO, w_TAN, mu_hist, Sigma,
+                                        Sigma_BL, q, A_mat, base_vec, rf_a_train)
+            if mc_result:
+                for delta_pct, bl_arr, tan_sh in mc_result:
+                    if delta_pct not in self._mc_bl_sums:
+                        self._mc_bl_sums[delta_pct]  = np.zeros(len(bl_arr))
+                        self._mc_tan_sums[delta_pct] = 0.0
+                    self._mc_bl_sums[delta_pct]  += bl_arr
+                    self._mc_tan_sums[delta_pct] += tan_sh
+                self._mc_nsteps += 1
 
             if self.verbose:
                 print(f"{str(oos_date.date()):<12} {n:>3}  "
@@ -864,7 +872,6 @@ class Backtester:
 
         df_w = pd.DataFrame(self._weights)
         df_c = pd.DataFrame(self._clusters)
-        df_m = pd.DataFrame(self._mc_rows)
 
         # ── 1. oos_returns_v2.csv ─────────────────────────────────────────
         df_oos.to_csv(f"{out}/oos_returns_v2.csv", index=False)
@@ -876,8 +883,23 @@ class Backtester:
         df_c.to_csv(f"{out}/cluster_signals_v2.csv", index=False)
 
         # ── 4. monte_carlo_v2.csv ─────────────────────────────────────────
-        if len(df_m) > 0:
-            df_m.to_csv(f"{out}/monte_carlo_v2.csv", index=False)
+        # Full distribution: N_MC_SIMS rows per delta level (averaged over OOS steps).
+        # Columns: Delta_Noise, Sim_ID, Sharpe_BL_KIO, Sharpe_TAN
+        # Shape: len(MC_DELTAS) × N_MC_SIMS rows  (e.g. 5 × 2000 = 10,000)
+        if self._mc_nsteps > 0:
+            mc_rows = []
+            for delta in sorted(self._mc_bl_sums.keys()):
+                avg_bl  = self._mc_bl_sums[delta]  / self._mc_nsteps   # (N,)
+                avg_tan = self._mc_tan_sums[delta]  / self._mc_nsteps   # scalar
+                for sim_id, sh in enumerate(avg_bl, start=1):
+                    mc_rows.append({
+                        "Delta_Noise":   delta,
+                        "Sim_ID":        sim_id,
+                        "Sharpe_BL_KIO": round(float(sh),       6),
+                        "Sharpe_TAN":    round(float(avg_tan),   6),
+                    })
+            df_mc = pd.DataFrame(mc_rows)
+            df_mc.to_csv(f"{out}/monte_carlo_v2.csv", index=False)
 
         # Set Date as index once so all series are aligned on the same index
         df_idx = df_oos.set_index("Date")
