@@ -401,6 +401,101 @@ def build():
     kv_subtable("gap",               "{:.4f}",  "Gap Statistic Gap(k):")
     kv_subtable("gap_sk",            "{:.4f}",  "Gap Statistic s_k (std × √(1+1/n_ref)):")
 
+    s.append(Spacer(1, 0.4*cm))
+
+    # 4d. Diebold-Mariano test & Bootstrap Sharpe CI
+    sec(s, "4d. Kiểm định Thống kê: Diebold-Mariano & Bootstrap Sharpe CI", level=2)
+    src(s, "dm_bootstrap_results.csv", "dm_bootstrap_monthly.csv")
+    s.append(Paragraph(
+        "Hai kiểm định bổ sung để xác nhận k=4 vượt trội k=2 về mặt thống kê:", BODY))
+    s.append(Paragraph(
+        "  A. Diebold-Mariano (1995) + Harvey-Leybourne-Newey (1997): "
+        "Kiểm định một phía H₀: E[r_k4] ≤ E[r_k2]; "
+        "loss differential d_t = r_k4_t − r_k2_t; "
+        "phương sai HAC theo Newey-West (h = ⌊T^(1/3)⌋ lags); "
+        "thống kê DM_HLN ~ t(T−1).", BODY))
+    s.append(Paragraph(
+        "  B. Bootstrap Sharpe CI (Efron & Tibshirani 1994): "
+        "B = 5,000 resample có hoàn lại; phương pháp percentile; "
+        "95% CI cho Sharpe của k=4 và k=2 trên 106 bước OOS chung; "
+        "dùng công thức Sharpe hình học nhất quán với phần kết quả chính.", BODY))
+
+    df_dm = load("dm_bootstrap_results.csv")
+
+    # DM test summary table
+    dm_vals = df_dm[df_dm["Test"] == "DM_HLN"].set_index("Metric")["Value"]
+    dm_disp = pd.DataFrame([
+        {"Chỉ số":                    "T (số tháng OOS chung)",
+         "Giá trị":                   int(dm_vals.get("T_common", 106))},
+        {"Chỉ số":                    "Newey-West lags h",
+         "Giá trị":                   int(dm_vals.get("NW_lags_h", 4))},
+        {"Chỉ số":                    "d̄ monthly (r_k4 − r_k2)",
+         "Giá trị":                   f"{float(dm_vals.get('d_bar_annual', 0)/12):+.5f}"},
+        {"Chỉ số":                    "d̄ annualised",
+         "Giá trị":                   f"{float(dm_vals.get('d_bar_annual', 0)):+.4f}"},
+        {"Chỉ số":                    "DM statistic (Newey-West)",
+         "Giá trị":                   f"{float(dm_vals.get('DM_stat', 0)):+.4f}"},
+        {"Chỉ số":                    "DM_HLN (t-corrected)",
+         "Giá trị":                   f"{float(dm_vals.get('DM_HLN', 0)):+.4f}"},
+        {"Chỉ số":                    "p-value (one-sided)",
+         "Giá trị":                   f"{float(dm_vals.get('p_value', 0)):.4f}"},
+        {"Chỉ số":                    "Có ý nghĩa 10% (p < 0.10)?",
+         "Giá trị":                   "CÓ ✓" if int(dm_vals.get("Significant 10%", 0)) else "KHÔNG"},
+        {"Chỉ số":                    "Có ý nghĩa 5% (p < 0.05)?",
+         "Giá trị":                   "CÓ ✓" if int(dm_vals.get("Significant 5%", 0)) else "KHÔNG"},
+    ])
+    s.append(Paragraph("Bảng A — Diebold-Mariano Test (H₀: k=4 không tốt hơn k=2):", BODY))
+    s.append(tbl(dm_disp, cw=[9*cm, 4*cm], fs=9))
+    s.append(Spacer(1, 0.3*cm))
+
+    # Bootstrap Sharpe CI table
+    b4 = df_dm[df_dm["Test"] == "Bootstrap_k4"].set_index("Metric")["Value"]
+    b2 = df_dm[df_dm["Test"] == "Bootstrap_k2"].set_index("Metric")["Value"]
+    sm = df_dm[df_dm["Test"] == "Summary"].set_index("Metric")["Value"]
+    boot_disp = pd.DataFrame([
+        {"Chỉ số":       "k",
+         "Sharpe Point": "",
+         "Boot SE":      "",
+         "95% CI lower": "",
+         "95% CI upper": ""},
+        {"Chỉ số":       "k = 4 (baseline)",
+         "Sharpe Point": f"{float(b4['Sharpe_point']):+.4f}",
+         "Boot SE":      f"{float(b4['Boot_SE']):.4f}",
+         "95% CI lower": f"{float(b4['CI_95_lo']):+.4f}",
+         "95% CI upper": f"{float(b4['CI_95_hi']):+.4f}"},
+        {"Chỉ số":       "k = 2",
+         "Sharpe Point": f"{float(b2['Sharpe_point']):+.4f}",
+         "Boot SE":      f"{float(b2['Boot_SE']):.4f}",
+         "95% CI lower": f"{float(b2['CI_95_lo']):+.4f}",
+         "95% CI upper": f"{float(b2['CI_95_hi']):+.4f}"},
+        {"Chỉ số":       "ΔSharpe (k4 − k2)",
+         "Sharpe Point": f"{float(sm['Delta_Sharpe_k4_minus_k2']):+.4f}",
+         "Boot SE":      "–",
+         "95% CI lower": "–",
+         "95% CI upper": "–"},
+    ])
+    s.append(Paragraph("Bảng B — Bootstrap Sharpe CI (B=5,000, percentile method):", BODY))
+    s.append(tbl(boot_disp, cw=[4.5*cm, 3*cm, 2.5*cm, 3*cm, 3*cm], fs=9))
+    s.append(Spacer(1, 0.3*cm))
+    s.append(Paragraph(
+        "Diễn giải: DM_HLN = +1.4133, p = 0.0803 → REJECT H₀ ở mức 10%: "
+        "lợi nhuận tháng BL_KIO(k=4) cao hơn BL_KIO(k=2) có ý nghĩa thống kê. "
+        "Bootstrap CI của k=4 và k=2 có chồng lấp (do T=106 nhỏ, power thấp), "
+        "nhưng effect size ΔSharpe = +0.2159 là lớn về kinh tế. "
+        "Kết hợp hai kiểm định: k=4 vượt trội k=2 ở mức ý nghĩa 10% (DM) "
+        "và có hiệu quả kinh tế đáng kể (ΔSharpe ≈ +0.22).", BODY))
+
+    # Monthly differential raw data
+    s.append(Spacer(1, 0.3*cm))
+    s.append(Paragraph("Dữ liệu monthly d_t = r_k4 − r_k2 (106 bước, dùng cho DM test):", BODY))
+    df_dm_m = load("dm_bootstrap_monthly.csv")
+    dm_m = df_dm_m.copy()
+    dm_m["Date"] = dm_m["Date"].astype(str).str[:10]
+    for c in ["r_k4","r_k2","rf","d_t","excess_k4","excess_k2"]:
+        if c in dm_m.columns:
+            dm_m[c] = dm_m[c].apply(lambda x: f"{x:+.5f}" if pd.notna(x) else "–")
+    s.append(tbl(dm_m, cw=[3.0*cm]+[2.5*cm]*6, fs=7))
+
     s.append(PageBreak())
 
     # ─────────────────────────────────────────────────────────────────────────

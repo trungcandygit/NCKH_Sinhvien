@@ -1,0 +1,18 @@
+Test,Metric,Value
+DM_HLN,DM_HLN statistic,1.4133
+DM_HLN,p-value (one-sided),0.0803
+DM_HLN,Significant 10%,1.0
+DM_HLN,Significant 5%,0.0
+DM_HLN,d_bar_annual,0.0486
+DM_HLN,T_common,106.0
+DM_HLN,NW_lags_h,4.0
+Bootstrap_k4,Sharpe_point,0.9396
+Bootstrap_k4,Boot_SE,0.4384
+Bootstrap_k4,CI_95_lo,0.1865
+Bootstrap_k4,CI_95_hi,1.8895
+Bootstrap_k2,Sharpe_point,0.7237
+Bootstrap_k2,Boot_SE,0.4109
+Bootstrap_k2,CI_95_lo,0.0063
+Bootstrap_k2,CI_95_hi,1.6248
+Summary,Delta_Sharpe_k4_minus_k2,0.2159
+Summary,CI_overlap_95pct,1.0
