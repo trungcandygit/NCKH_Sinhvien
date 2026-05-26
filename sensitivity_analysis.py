@@ -34,14 +34,15 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-# Import core classes from backtest_v2 (same directory)
+# Import core classes from modular files (same directory)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from backtest_v2 import (
-    Config, build_rf_series,
-    DataLoader, ClusterSignalGenerator,
-    BlackLittermanEngine, PortfolioOptimiser,
-    PerformanceCalculator,
-)
+from backtest import Backtester
+from config import Config, build_rf_series
+from data import DataLoader
+from kmeans_signal import ClusterSignalGenerator
+from bl import BlackLittermanEngine
+from optimise import PortfolioOptimiser
+from perf import PerformanceCalculator
 
 
 # =============================================================================
@@ -105,21 +106,17 @@ class FastBacktester:
             mu_BL, Sigma_BL, _, _ = self.bl_eng.posterior(Pi, Sigma, P, q)
 
             w_TAN    = self.optim.tangency(mu_hist, Sigma, rf_a_train)
-            w_MV     = self.optim.min_variance(Sigma)
             w_BL     = self.optim.bl_equilibrium(Pi, Sigma, rf_a_train)
             w_BL_KIO = self.optim.bl_tangency(mu_BL, Sigma_BL, rf_a_train)
             w_EW     = self.optim.equal_weight(n)
-            w_RP     = self.optim.risk_parity(Sigma)
 
             oos_rows.append(dict(
                 Date=oos_date, RF_monthly=rf_m_oos,
                 MKT=float(w_mkt    @ oos_r),
                 TAN=float(w_TAN    @ oos_r),
-                MV =float(w_MV     @ oos_r),
                 BL =float(w_BL     @ oos_r),
                 BL_KIO=float(w_BL_KIO @ oos_r),
                 EW =float(w_EW     @ oos_r),
-                RP =float(w_RP     @ oos_r),
             ))
 
         if not oos_rows:
@@ -131,7 +128,7 @@ class FastBacktester:
 
         return {
             p: self.perf.compute(df_idx[p], rf_s, p)
-            for p in ["MKT", "TAN", "MV", "BL", "BL_KIO", "EW", "RP"]
+            for p in ["MKT", "TAN", "BL", "BL_KIO", "EW"]
         }
 
 
