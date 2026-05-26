@@ -313,20 +313,31 @@ def build():
     # ─────────────────────────────────────────────────────────────────────────
     # 4. KIỂM ĐỊNH K TỐI ƯU
     # ─────────────────────────────────────────────────────────────────────────
-    sec(s, "4. Kiểm định Số cụm K tối ưu – Elbow Method + Silhouette Score")
+    sec(s, "4. Kiểm định Số cụm K tối ưu – 4 tiêu chí thống kê + Gap Statistic")
     src(s, "kmeans_k_summary.csv", "kmeans_k_validation.csv")
     s.append(Paragraph(
-        "Elbow method: inertia (WCSS) giảm – tìm điểm 'gãy'. "
-        "Silhouette score (Rousseeuw 1987): giá trị cao = cụm tách biệt tốt. "
-        "k=4 được chọn dựa trên hiệu suất OOS tốt nhất (Sharpe 0.9396) "
-        "và silhouette chấp nhận được (0.389, chênh lệch nhỏ so với k=2: 0.420). "
-        "k=5 cho kết quả gần giống (0.9395) xác nhận k=4 không phải điểm đơn lẻ.", BODY))
+        "Bốn tiêu chí nội tại (internal metrics) được tính trên mỗi bước rolling window "
+        "rồi lấy trung bình qua 75 bước OOS:", BODY))
+    s.append(Paragraph(
+        "  (1) Elbow / Inertia (WCSS) — thấp hơn = cụm chặt hơn; tìm điểm 'gãy'. "
+        "  (2) Silhouette (Rousseeuw 1987) — cao hơn = cụm tách biệt tốt hơn. "
+        "  (3) Calinski-Harabasz (Variance Ratio) — cao hơn = phân tán giữa-cụm lớn. "
+        "  (4) Davies-Bouldin — thấp hơn = cụm ít chồng chéo hơn. "
+        "  (5) Gap Statistic (Tibshirani et al. 2001) — Gap(k) ≥ Gap(k+1)−s_{k+1}.", BODY))
+    s.append(Paragraph(
+        "Kết quả: các tiêu chí KHÔNG đồng thuận — Silhouette → k=2, "
+        "Calinski-Harabasz/Davies-Bouldin → k=6, Gap → k=2. "
+        "Đây là hiện tượng phổ biến: internal metrics đo hình dạng cụm, "
+        "không đo khả năng dự báo tài chính (DeMiguel et al. 2009). "
+        "k=4 được chọn dựa trên OOS Sharpe cao nhất (0.9396) trong sensitivity sweep, "
+        "và k=5 cho kết quả gần bằng (0.9395) xác nhận k=4 không phải điểm đơn lẻ.", BODY))
     df_ks = load("kmeans_k_summary.csv")
     dks = df_ks.copy()
-    dks["Mean_Inertia"]    = dks["Mean_Inertia"].apply(lambda x: f"{x:.4f}")
-    dks["Mean_Silhouette"] = dks["Mean_Silhouette"].apply(lambda x: f"{x:.4f}")
-    dks["Std_Silhouette"]  = dks["Std_Silhouette"].apply(lambda x: f"{x:.4f}")
-    s.append(tbl(dks, cw=[2.5*cm,5*cm,5.5*cm,5.5*cm], fs=9))
+    for col in ["Mean_Inertia","Mean_Silhouette","Std_Silhouette",
+                "Mean_Calinski_Harabasz","Mean_Davies_Bouldin","Mean_Gap","Mean_Gap_sk"]:
+        if col in dks.columns:
+            dks[col] = dks[col].apply(lambda x: f"{x:.4f}")
+    s.append(tbl(dks, fs=8))
 
     s.append(Spacer(1, 0.4*cm))
 
@@ -353,25 +364,42 @@ def build():
 
     s.append(Spacer(1, 0.4*cm))
 
-    # 4c. Per-step k validation raw data
-    sec(s, "4c. Dữ liệu Inertia + Silhouette theo từng bước OOS (75 bước)", level=2)
+    # 4c. Per-step k validation raw data  (split by metric to fit A4 width)
+    sec(s, "4c. Dữ liệu 5 tiêu chí K-validation theo từng bước OOS (75 bước)", level=2)
     src(s, "kmeans_k_validation.csv")
     s.append(Paragraph(
-        "Tại mỗi bước rolling window: inertia và silhouette score cho k=2..6. "
-        "Mỗi dòng là 1 bước OOS. Đây là dữ liệu gốc tính mean ở bảng 4a.", BODY))
+        "Tại mỗi bước rolling window: tất cả 5 tiêu chí (Inertia, Silhouette, "
+        "Calinski-Harabasz, Davies-Bouldin, Gap) cho k=2..6. "
+        "Do 32 cột không vừa 1 trang A4, dữ liệu được chia thành 6 bảng nhỏ "
+        "theo từng tiêu chí. Đây là dữ liệu gốc tính mean ở bảng 4a.", BODY))
     df_kv = load("kmeans_k_validation.csv")
-    # Format numbers
-    dkv = df_kv.copy()
-    for c in dkv.columns:
-        if c == "Date":
-            pass
-        elif "inertia" in c:
-            dkv[c] = dkv[c].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
-        elif "silhouette" in c:
-            dkv[c] = dkv[c].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "–")
-    n_cols = len(dkv.columns)
-    cw_kv = [3*cm] + [2.8*cm] * (n_cols - 1)
-    s.append(tbl(dkv, cw=cw_kv, fs=6.5))
+    k_vals_str = ["k2","k3","k4","k5","k6"]
+
+    # Sub-table 1: N_stocks
+    dkv_ns = df_kv[["Date","N_stocks"]].copy()
+    dkv_ns["Date"] = dkv_ns["Date"].astype(str).str[:10]
+    s.append(Paragraph("N cổ phiếu active mỗi bước:", BODY))
+    s.append(tbl(dkv_ns, cw=[3.0*cm, 2.5*cm], fs=7))
+    s.append(Spacer(1, 0.25*cm))
+
+    # Helper to build sub-table for a given metric prefix
+    def kv_subtable(prefix, fmt, label):
+        cols = ["Date"] + [f"{prefix}_{kk}" for kk in k_vals_str]
+        sub = df_kv[cols].copy()
+        sub["Date"] = sub["Date"].astype(str).str[:10]
+        sub.columns = ["Date"] + k_vals_str
+        for kk in k_vals_str:
+            sub[kk] = sub[kk].apply(lambda x: fmt.format(x) if pd.notna(x) else "–")
+        s.append(Paragraph(label, BODY))
+        s.append(tbl(sub, cw=[3.0*cm]+[2.5*cm]*5, fs=7))
+        s.append(Spacer(1, 0.25*cm))
+
+    kv_subtable("inertia",           "{:.2f}",  "Inertia (WCSS) – thấp hơn = cụm chặt hơn:")
+    kv_subtable("silhouette",        "{:.4f}",  "Silhouette – cao hơn = cụm tách biệt tốt hơn:")
+    kv_subtable("calinski_harabasz", "{:.2f}",  "Calinski-Harabasz – cao hơn = phân tán giữa-cụm lớn:")
+    kv_subtable("davies_bouldin",    "{:.4f}",  "Davies-Bouldin – thấp hơn = cụm ít chồng chéo:")
+    kv_subtable("gap",               "{:.4f}",  "Gap Statistic Gap(k):")
+    kv_subtable("gap_sk",            "{:.4f}",  "Gap Statistic s_k (std × √(1+1/n_ref)):")
 
     s.append(PageBreak())
 
