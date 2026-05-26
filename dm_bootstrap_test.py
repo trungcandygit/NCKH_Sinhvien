@@ -1,25 +1,25 @@
 """
 =============================================================================
-Diebold-Mariano Test & Bootstrap Sharpe CI  –  k=4 vs k=2 for BL_KIO
+Diebold-Mariano Test & Bootstrap Sharpe CI  –  k=6 vs k=2 and k=6 vs k=4
 =============================================================================
-Two complementary statistical tests to justify k=4 over k=2:
+Two complementary statistical tests to justify k=6 (new baseline):
 
   A. Diebold-Mariano (1995) + Harvey-Leybourne-Newey (1997) small-sample
-       Loss differential: d_t = r_k4_t − r_k2_t
-       H₀: E[d_t] ≤ 0  (k=4 not better)
-       H₁: E[d_t] > 0  (k=4 better) — one-sided
+       Loss differential: d_t = r_k6_t − r_kX_t  (X = 2 and X = 4)
+       H₀: E[d_t] ≤ 0  (k=6 not better)
+       H₁: E[d_t] > 0  (k=6 better) — one-sided
        HAC variance via Newey-West (max_lag = ⌊T^(1/3)⌋)
 
   B. Bootstrap Sharpe CI (Efron & Tibshirani 1994, percentile method)
-       B = 5,000 resamples; 95% CI for each k
+       B = 5,000 resamples; 95% CI for k=2, k=4, k=6
        Non-overlap ↔ statistically distinct Sharpe ratios
 
-Both tests run on IDENTICAL OOS dates (inner join of k=4 and k=2 windows).
+All tests run on IDENTICAL OOS dates (inner join across k windows).
 
 Output
 ------
   output/dm_bootstrap_results.csv  – summary metrics
-  output/dm_bootstrap_monthly.csv  – aligned monthly returns k2 / k4
+  output/dm_bootstrap_monthly.csv  – aligned monthly returns k2/k4/k6
 =============================================================================
 """
 
@@ -221,140 +221,132 @@ def bootstrap_sharpe(r: np.ndarray, rf: np.ndarray,
 #  MAIN
 # =============================================================================
 
+def _dm_pair(label: str, r_new: np.ndarray, r_old: np.ndarray,
+             rf_new: np.ndarray, rf_old: np.ndarray) -> dict:
+    """Run DM test for one pair (new k vs old k) and return result dict."""
+    d      = r_new - r_old
+    res    = diebold_mariano_test(d)
+    boot_n = bootstrap_sharpe(r_new, rf_new)
+    boot_o = bootstrap_sharpe(r_old, rf_old, seed=RANDOM_SEED + 1)
+    overlap = (boot_n["CI_95_lo"] < boot_o["CI_95_hi"] and
+               boot_o["CI_95_lo"] < boot_n["CI_95_hi"])
+    sig = ("***" if res["sig_1pct"] else "**" if res["sig_5pct"]
+           else "*" if res["sig_10pct"] else "n.s.")
+    print(f"\n  ── {label} ──")
+    print(f"     T={res['T']}  h={res['h_lags']}  "
+          f"d̄_ann={res['d_bar_annual']:+.4f}  "
+          f"DM_HLN={res['DM_HLN']:+.4f}  p={res['p_value']:.4f}  {sig}")
+    print(f"     Sharpe new={boot_n['Sharpe_point']:+.4f} "
+          f"CI=[{boot_n['CI_95_lo']:+.4f},{boot_n['CI_95_hi']:+.4f}]  "
+          f"old={boot_o['Sharpe_point']:+.4f} "
+          f"CI=[{boot_o['CI_95_lo']:+.4f},{boot_o['CI_95_hi']:+.4f}]")
+    print(f"     ΔSharpe={boot_n['Sharpe_point']-boot_o['Sharpe_point']:+.4f}  "
+          f"CI overlap: {'YES' if overlap else 'NO'}")
+    return {
+        "pair": label,
+        "T": res["T"], "h_lags": res["h_lags"],
+        "d_bar_annual": res["d_bar_annual"],
+        "DM_stat": res["DM_stat"],
+        "DM_HLN": res["DM_HLN"],
+        "p_value": res["p_value"],
+        "sig": sig,
+        "sig_10pct": int(res["sig_10pct"]),
+        "sig_5pct":  int(res["sig_5pct"]),
+        "sig_1pct":  int(res["sig_1pct"]),
+        "Sharpe_new": boot_n["Sharpe_point"],
+        "Boot_SE_new": boot_n["Boot_SE"],
+        "CI_lo_new": boot_n["CI_95_lo"],
+        "CI_hi_new": boot_n["CI_95_hi"],
+        "Sharpe_old": boot_o["Sharpe_point"],
+        "Boot_SE_old": boot_o["Boot_SE"],
+        "CI_lo_old": boot_o["CI_95_lo"],
+        "CI_hi_old": boot_o["CI_95_hi"],
+        "Delta_Sharpe": round(boot_n["Sharpe_point"] - boot_o["Sharpe_point"], 4),
+        "CI_overlap_95pct": int(overlap),
+    }
+
+
 def run() -> pd.DataFrame:
-    print("=" * 65)
-    print("  DM Test & Bootstrap Sharpe CI  –  BL_KIO(k=4) vs BL_KIO(k=2)")
-    print("=" * 65)
+    print("=" * 70)
+    print("  DM Test & Bootstrap Sharpe CI  –  k=6 vs k=4 vs k=2 for BL_KIO")
+    print("=" * 70)
 
-    # ── Run both series ───────────────────────────────────────────────────────
-    print("\n[1/4] Running BL_KIO with k=4 …", flush=True)
+    # ── Run all three series ──────────────────────────────────────────────────
+    print("\n[1/3] Running BL_KIO with k=6 (new baseline) …", flush=True)
+    df6 = run_bl_kio_series(k=6)
+    print("[2/3] Running BL_KIO with k=4 (old baseline) …", flush=True)
     df4 = run_bl_kio_series(k=4)
-
-    print("[2/4] Running BL_KIO with k=2 …", flush=True)
+    print("[3/3] Running BL_KIO with k=2 …", flush=True)
     df2 = run_bl_kio_series(k=2)
 
-    # ── Align on common dates (inner join) ────────────────────────────────────
-    common = df4.index.intersection(df2.index)
+    # ── Align on common dates (inner join of all three) ───────────────────────
+    common = df6.index.intersection(df4.index).intersection(df2.index)
+    r6  = df6.loc[common, "r_BL_KIO"].values
     r4  = df4.loc[common, "r_BL_KIO"].values
     r2  = df2.loc[common, "r_BL_KIO"].values
+    rf6 = df6.loc[common, "rf_monthly"].values
     rf4 = df4.loc[common, "rf_monthly"].values
     rf2 = df2.loc[common, "rf_monthly"].values
     T   = len(common)
-    print(f"       Common OOS dates: {T}  "
+    print(f"\n  Common OOS dates: {T}  "
           f"({common[0].date()} → {common[-1].date()})")
 
     # Save monthly comparison
     monthly = pd.DataFrame({
-        "Date":       common,
-        "r_k4":       r4,
-        "r_k2":       r2,
-        "rf":         rf4,
-        "d_t":        r4 - r2,
-        "excess_k4":  r4 - rf4,
-        "excess_k2":  r2 - rf2,
+        "Date":      [d.strftime("%Y-%m-%d") for d in common],
+        "r_k6":      r6,
+        "r_k4":      r4,
+        "r_k2":      r2,
+        "rf":        rf6,
+        "d_k6_k4":  r6 - r4,
+        "d_k6_k2":  r6 - r2,
+        "d_k4_k2":  r4 - r2,
     })
     os.makedirs("output", exist_ok=True)
     monthly.to_csv("output/dm_bootstrap_monthly.csv", index=False)
 
-    # ── Test A: DM test ───────────────────────────────────────────────────────
-    print("\n[3/4] Running Diebold-Mariano test …", flush=True)
-    d      = r4 - r2
-    dm_res = diebold_mariano_test(d)
+    # ── Tests ─────────────────────────────────────────────────────────────────
+    print("\n── Diebold-Mariano + Bootstrap (B={:,}) ──".format(N_BOOTSTRAP))
+    pairs = []
+    pairs.append(_dm_pair("k=6 vs k=4  (new vs old baseline)",
+                          r6, r4, rf6, rf4))
+    pairs.append(_dm_pair("k=6 vs k=2  (new baseline vs weakest)",
+                          r6, r2, rf6, rf2))
+    pairs.append(_dm_pair("k=4 vs k=2  (old baseline vs weakest)",
+                          r4, r2, rf4, rf2))
 
-    print(f"\n  ── A. Diebold-Mariano (HLN correction) ──")
-    print(f"     T = {dm_res['T']}  |  Newey-West lags h = {dm_res['h_lags']}")
-    print(f"     Mean monthly differential  d̄  = {dm_res['d_bar_monthly']:+.5f}  "
-          f"({dm_res['d_bar_annual']:+.4f} ann.)")
-    print(f"     DM statistic               = {dm_res['DM_stat']:+.4f}")
-    print(f"     DM_HLN (t-corrected)       = {dm_res['DM_HLN']:+.4f}")
-    print(f"     p-value (one-sided)        = {dm_res['p_value']:.4f}")
-    sig = ("***" if dm_res["sig_1pct"]  else
-           "**"  if dm_res["sig_5pct"]  else
-           "*"   if dm_res["sig_10pct"] else "n.s.")
-    print(f"     Significance               = {sig}  "
-          f"({'REJECT H₀' if dm_res['sig_10pct'] else 'FAIL TO REJECT H₀'})")
+    # Also bootstrap for k=6 standalone
+    boot6 = bootstrap_sharpe(r6, rf6, seed=RANDOM_SEED + 2)
+    boot4 = bootstrap_sharpe(r4, rf4, seed=RANDOM_SEED + 3)
+    boot2 = bootstrap_sharpe(r2, rf2, seed=RANDOM_SEED + 4)
+    print(f"\n  ── Standalone Bootstrap Sharpe ──")
+    for lbl, b in [("k=6", boot6), ("k=4", boot4), ("k=2", boot2)]:
+        print(f"     {lbl}: {b['Sharpe_point']:+.4f}  "
+              f"SE={b['Boot_SE']:.4f}  "
+              f"95%CI=[{b['CI_95_lo']:+.4f},{b['CI_95_hi']:+.4f}]")
 
-    # ── Test B: Bootstrap Sharpe CI ───────────────────────────────────────────
-    print(f"\n[4/4] Bootstrap Sharpe CI (B={N_BOOTSTRAP:,}) …", flush=True)
-    boot4 = bootstrap_sharpe(r4, rf4)
-    boot2 = bootstrap_sharpe(r2, rf2, seed=RANDOM_SEED + 1)
-
-    overlap = boot4["CI_95_lo"] < boot2["CI_95_hi"] and boot2["CI_95_lo"] < boot4["CI_95_hi"]
-
-    print(f"\n  ── B. Bootstrap Sharpe CI (95%, percentile method) ──")
-    print(f"     k=4: Sharpe = {boot4['Sharpe_point']:+.4f}  "
-          f"SE = {boot4['Boot_SE']:.4f}  "
-          f"CI = [{boot4['CI_95_lo']:+.4f}, {boot4['CI_95_hi']:+.4f}]")
-    print(f"     k=2: Sharpe = {boot2['Sharpe_point']:+.4f}  "
-          f"SE = {boot2['Boot_SE']:.4f}  "
-          f"CI = [{boot2['CI_95_lo']:+.4f}, {boot2['CI_95_hi']:+.4f}]")
-    print(f"     CI overlap: {'YES (not statistically distinct at 95%)' if overlap else 'NO (statistically distinct at 95%)'}")
-    print(f"     Effect size ΔSharpe = {boot4['Sharpe_point'] - boot2['Sharpe_point']:+.4f}")
-
-    # ── Combined output table ─────────────────────────────────────────────────
-    results = pd.DataFrame([
-        # DM test row
-        {"Test": "DM_HLN",
-         "Metric": "DM_HLN statistic",       "Value": round(dm_res["DM_HLN"], 4)},
-        {"Test": "DM_HLN",
-         "Metric": "p-value (one-sided)",     "Value": round(dm_res["p_value"], 4)},
-        {"Test": "DM_HLN",
-         "Metric": "Significant 10%",         "Value": int(dm_res["sig_10pct"])},
-        {"Test": "DM_HLN",
-         "Metric": "Significant 5%",          "Value": int(dm_res["sig_5pct"])},
-        {"Test": "DM_HLN",
-         "Metric": "d_bar_annual",            "Value": round(dm_res["d_bar_annual"], 4)},
-        {"Test": "DM_HLN",
-         "Metric": "T_common",               "Value": T},
-        {"Test": "DM_HLN",
-         "Metric": "NW_lags_h",              "Value": dm_res["h_lags"]},
-        # Bootstrap k=4
-        {"Test": "Bootstrap_k4",
-         "Metric": "Sharpe_point",            "Value": round(boot4["Sharpe_point"], 4)},
-        {"Test": "Bootstrap_k4",
-         "Metric": "Boot_SE",                 "Value": round(boot4["Boot_SE"], 4)},
-        {"Test": "Bootstrap_k4",
-         "Metric": "CI_95_lo",               "Value": round(boot4["CI_95_lo"], 4)},
-        {"Test": "Bootstrap_k4",
-         "Metric": "CI_95_hi",               "Value": round(boot4["CI_95_hi"], 4)},
-        # Bootstrap k=2
-        {"Test": "Bootstrap_k2",
-         "Metric": "Sharpe_point",            "Value": round(boot2["Sharpe_point"], 4)},
-        {"Test": "Bootstrap_k2",
-         "Metric": "Boot_SE",                 "Value": round(boot2["Boot_SE"], 4)},
-        {"Test": "Bootstrap_k2",
-         "Metric": "CI_95_lo",               "Value": round(boot2["CI_95_lo"], 4)},
-        {"Test": "Bootstrap_k2",
-         "Metric": "CI_95_hi",               "Value": round(boot2["CI_95_hi"], 4)},
-        # Summary
-        {"Test": "Summary",
-         "Metric": "Delta_Sharpe_k4_minus_k2","Value": round(boot4["Sharpe_point"] - boot2["Sharpe_point"], 4)},
-        {"Test": "Summary",
-         "Metric": "CI_overlap_95pct",        "Value": int(overlap)},
-    ])
-
+    results = pd.DataFrame(pairs)
     results.to_csv("output/dm_bootstrap_results.csv", index=False)
-    print(f"\n  Saved: output/dm_bootstrap_results.csv")
+
+    # Standalone summary
+    standalone = pd.DataFrame([
+        {"k": 6, **{m: round(v, 4) for m, v in boot6.items()}},
+        {"k": 4, **{m: round(v, 4) for m, v in boot4.items()}},
+        {"k": 2, **{m: round(v, 4) for m, v in boot2.items()}},
+    ])
+    standalone.to_csv("output/dm_bootstrap_sharpe_ci.csv", index=False)
+
+    print(f"\n  Saved: output/dm_bootstrap_results.csv  ({len(results)} pairs)")
     print(f"  Saved: output/dm_bootstrap_monthly.csv  ({T} rows)")
-    print()
+    print(f"  Saved: output/dm_bootstrap_sharpe_ci.csv")
 
-    print("=" * 65)
-    print("  INTERPRETATION")
-    print("=" * 65)
-    if dm_res["sig_10pct"]:
-        print(f"  DM test: REJECT H₀ at {10 if not dm_res['sig_5pct'] else 5}% → "
-              f"k=4 monthly returns significantly higher than k=2")
-    else:
-        print(f"  DM test: FAIL TO REJECT H₀ → cannot reject equality at 10%")
-        print(f"  (with T={T} OOS months, power is limited for modest differences)")
-
-    if not overlap:
-        print(f"  Bootstrap: CIs DO NOT overlap → Sharpe(k=4) statistically "
-              f"distinct from Sharpe(k=2) at 95%")
-    else:
-        print(f"  Bootstrap: CIs overlap → cannot reject H₀: Sharpe(k=4)=Sharpe(k=2)")
-        print(f"  Economic effect size ΔSharpe = "
-              f"{boot4['Sharpe_point']-boot2['Sharpe_point']:+.4f} (substantial)")
+    print("\n" + "=" * 70)
+    print("  SUMMARY")
+    print("=" * 70)
+    for p in pairs:
+        rej = "REJECT H₀" if p["sig_10pct"] else "fail to reject"
+        print(f"  {p['pair']:<40} p={p['p_value']:.4f} {p['sig']:<5} "
+              f"ΔSharpe={p['Delta_Sharpe']:+.4f}  → {rej}")
 
     return results
 

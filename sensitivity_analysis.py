@@ -9,7 +9,7 @@ Parameters swept
 ----------------
   lookback    : 24, 36 (baseline), 48  months
   max_weight  : 20%, 30% (baseline), 40%  per-stock cap
-  k_clusters  : 2, 3 (baseline), 4, 5  K-means clusters
+  k_clusters  : 2, 3, 4, 5, 6 (baseline)  K-means clusters
   rf_rate     : 4%, 5%, 6% (fixed),  VN10Y (baseline, time-varying)
 
 Baseline: lookback=36, max_weight=30%, k=4, rf=VN10Y

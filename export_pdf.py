@@ -325,12 +325,18 @@ def build():
         "  (4) Davies-Bouldin — thấp hơn = cụm ít chồng chéo hơn. "
         "  (5) Gap Statistic (Tibshirani et al. 2001) — Gap(k) ≥ Gap(k+1)−s_{k+1}.", BODY))
     s.append(Paragraph(
-        "Kết quả: các tiêu chí KHÔNG đồng thuận — Silhouette → k=2, "
-        "Calinski-Harabasz/Davies-Bouldin → k=6, Gap → k=2. "
+        "Kết quả: các tiêu chí KHÔNG đồng thuận — Silhouette và Gap Statistic → k=2 "
+        "(k=2 được chọn trong 92% bước OOS theo Gap criterion); "
+        "Calinski-Harabasz và Davies-Bouldin → k=6. "
         "Đây là hiện tượng phổ biến: internal metrics đo hình dạng cụm, "
         "không đo khả năng dự báo tài chính (DeMiguel et al. 2009). "
-        "k=4 được chọn dựa trên OOS Sharpe cao nhất (0.9396) trong sensitivity sweep, "
-        "và k=5 cho kết quả gần bằng (0.9395) xác nhận k=4 không phải điểm đơn lẻ.", BODY))
+        "k=4 được chọn làm baseline vì: (1) OOS Sharpe cao nhất trên tập so sánh công bằng "
+        "(106 bước); (2) k=6 yêu cầu ≥8 cổ phiếu nên chỉ chạy được 75 bước — "
+        "Sharpe 1.04 của k=6 trong sensitivity bị ảnh hưởng bởi sample selection bias "
+        "(bỏ qua 31 bước 'khó'); (3) trên 75 bước chung, k=4 (1.0603) nhỉnh hơn k=6 (1.0400) "
+        "nhưng không có ý nghĩa thống kê (DM p=0.54); "
+        "(4) k=4 và k=5 cho kết quả gần như bằng nhau (0.9396 so với 0.9395) "
+        "xác nhận k=4 nằm tại vùng plateau ổn định.", BODY))
     df_ks = load("kmeans_k_summary.csv")
     dks = df_ks.copy()
     for col in ["Mean_Inertia","Mean_Silhouette","Std_Silhouette",
@@ -405,96 +411,60 @@ def build():
 
     # 4d. Diebold-Mariano test & Bootstrap Sharpe CI
     sec(s, "4d. Kiểm định Thống kê: Diebold-Mariano & Bootstrap Sharpe CI", level=2)
-    src(s, "dm_bootstrap_results.csv", "dm_bootstrap_monthly.csv")
+    src(s, "dm_bootstrap_results.csv", "dm_bootstrap_sharpe_ci.csv", "dm_bootstrap_monthly.csv")
     s.append(Paragraph(
-        "Hai kiểm định bổ sung để xác nhận k=4 vượt trội k=2 về mặt thống kê:", BODY))
+        "Ba cặp so sánh DM + Bootstrap trên 75 bước OOS chung (tập giao của k=2,4,6) "
+        "để xác định k tối ưu và phát hiện sample selection bias của k=6:", BODY))
     s.append(Paragraph(
         "  A. Diebold-Mariano (1995) + Harvey-Leybourne-Newey (1997): "
-        "Kiểm định một phía H₀: E[r_k4] ≤ E[r_k2]; "
-        "loss differential d_t = r_k4_t − r_k2_t; "
-        "phương sai HAC theo Newey-West (h = ⌊T^(1/3)⌋ lags); "
-        "thống kê DM_HLN ~ t(T−1).", BODY))
+        "loss differential d_t = r_kA_t - r_kB_t; HAC Newey-West (h=4 lags); "
+        "thong ke DM_HLN ~ t(T-1); kiem dinh mot phia H0: kA khong tot hon kB.", BODY))
     s.append(Paragraph(
-        "  B. Bootstrap Sharpe CI (Efron & Tibshirani 1994): "
-        "B = 5,000 resample có hoàn lại; phương pháp percentile; "
-        "95% CI cho Sharpe của k=4 và k=2 trên 106 bước OOS chung; "
-        "dùng công thức Sharpe hình học nhất quán với phần kết quả chính.", BODY))
+        "  B. Bootstrap Sharpe CI (Efron & Tibshirani 1994): B=5,000 resample; "
+        "Sharpe hinh hoc nhat quan voi PerformanceCalculator.", BODY))
 
     df_dm = load("dm_bootstrap_results.csv")
-
-    # DM test summary table
-    dm_vals = df_dm[df_dm["Test"] == "DM_HLN"].set_index("Metric")["Value"]
     dm_disp = pd.DataFrame([
-        {"Chỉ số":                    "T (số tháng OOS chung)",
-         "Giá trị":                   int(dm_vals.get("T_common", 106))},
-        {"Chỉ số":                    "Newey-West lags h",
-         "Giá trị":                   int(dm_vals.get("NW_lags_h", 4))},
-        {"Chỉ số":                    "d̄ monthly (r_k4 − r_k2)",
-         "Giá trị":                   f"{float(dm_vals.get('d_bar_annual', 0)/12):+.5f}"},
-        {"Chỉ số":                    "d̄ annualised",
-         "Giá trị":                   f"{float(dm_vals.get('d_bar_annual', 0)):+.4f}"},
-        {"Chỉ số":                    "DM statistic (Newey-West)",
-         "Giá trị":                   f"{float(dm_vals.get('DM_stat', 0)):+.4f}"},
-        {"Chỉ số":                    "DM_HLN (t-corrected)",
-         "Giá trị":                   f"{float(dm_vals.get('DM_HLN', 0)):+.4f}"},
-        {"Chỉ số":                    "p-value (one-sided)",
-         "Giá trị":                   f"{float(dm_vals.get('p_value', 0)):.4f}"},
-        {"Chỉ số":                    "Có ý nghĩa 10% (p < 0.10)?",
-         "Giá trị":                   "CÓ ✓" if int(dm_vals.get("Significant 10%", 0)) else "KHÔNG"},
-        {"Chỉ số":                    "Có ý nghĩa 5% (p < 0.05)?",
-         "Giá trị":                   "CÓ ✓" if int(dm_vals.get("Significant 5%", 0)) else "KHÔNG"},
+        {"Cap so sanh": str(p["pair"]),
+         "T":           int(p["T"]),
+         "d-bar ann.":  f"{float(p['d_bar_annual']):+.4f}",
+         "DM_HLN":      f"{float(p['DM_HLN']):+.4f}",
+         "p-value":     f"{float(p['p_value']):.4f}",
+         "Sig.":        str(p["sig"]),
+         "DeltaSharpe": f"{float(p['Delta_Sharpe']):+.4f}"}
+        for _, p in df_dm.iterrows()
     ])
-    s.append(Paragraph("Bảng A — Diebold-Mariano Test (H₀: k=4 không tốt hơn k=2):", BODY))
-    s.append(tbl(dm_disp, cw=[9*cm, 4*cm], fs=9))
+    s.append(Paragraph("Bang A — Ket qua Diebold-Mariano (3 cap, T=75 buoc chung):", BODY))
+    s.append(tbl(dm_disp, cw=[5.5*cm,1.2*cm,2*cm,2*cm,2*cm,1.5*cm,2*cm], fs=8))
     s.append(Spacer(1, 0.3*cm))
 
-    # Bootstrap Sharpe CI table
-    b4 = df_dm[df_dm["Test"] == "Bootstrap_k4"].set_index("Metric")["Value"]
-    b2 = df_dm[df_dm["Test"] == "Bootstrap_k2"].set_index("Metric")["Value"]
-    sm = df_dm[df_dm["Test"] == "Summary"].set_index("Metric")["Value"]
-    boot_disp = pd.DataFrame([
-        {"Chỉ số":       "k",
-         "Sharpe Point": "",
-         "Boot SE":      "",
-         "95% CI lower": "",
-         "95% CI upper": ""},
-        {"Chỉ số":       "k = 4 (baseline)",
-         "Sharpe Point": f"{float(b4['Sharpe_point']):+.4f}",
-         "Boot SE":      f"{float(b4['Boot_SE']):.4f}",
-         "95% CI lower": f"{float(b4['CI_95_lo']):+.4f}",
-         "95% CI upper": f"{float(b4['CI_95_hi']):+.4f}"},
-        {"Chỉ số":       "k = 2",
-         "Sharpe Point": f"{float(b2['Sharpe_point']):+.4f}",
-         "Boot SE":      f"{float(b2['Boot_SE']):.4f}",
-         "95% CI lower": f"{float(b2['CI_95_lo']):+.4f}",
-         "95% CI upper": f"{float(b2['CI_95_hi']):+.4f}"},
-        {"Chỉ số":       "ΔSharpe (k4 − k2)",
-         "Sharpe Point": f"{float(sm['Delta_Sharpe_k4_minus_k2']):+.4f}",
-         "Boot SE":      "–",
-         "95% CI lower": "–",
-         "95% CI upper": "–"},
-    ])
-    s.append(Paragraph("Bảng B — Bootstrap Sharpe CI (B=5,000, percentile method):", BODY))
-    s.append(tbl(boot_disp, cw=[4.5*cm, 3*cm, 2.5*cm, 3*cm, 3*cm], fs=9))
+    df_bci = load("dm_bootstrap_sharpe_ci.csv")
+    bci_disp = df_bci.copy()
+    for c in ["Sharpe_point","Boot_SE","Boot_mean","CI_95_lo","CI_95_hi"]:
+        if c in bci_disp.columns:
+            bci_disp[c] = bci_disp[c].apply(lambda x: f"{x:+.4f}")
+    s.append(Paragraph("Bang B — Bootstrap Sharpe CI (B=5,000, k=2/4/6 tren 75 buoc chung):", BODY))
+    s.append(tbl(bci_disp, cw=[1.5*cm,3*cm,2.5*cm,2.5*cm,3*cm,3*cm], fs=8.5))
     s.append(Spacer(1, 0.3*cm))
     s.append(Paragraph(
-        "Diễn giải: DM_HLN = +1.4133, p = 0.0803 → REJECT H₀ ở mức 10%: "
-        "lợi nhuận tháng BL_KIO(k=4) cao hơn BL_KIO(k=2) có ý nghĩa thống kê. "
-        "Bootstrap CI của k=4 và k=2 có chồng lấp (do T=106 nhỏ, power thấp), "
-        "nhưng effect size ΔSharpe = +0.2159 là lớn về kinh tế. "
-        "Kết hợp hai kiểm định: k=4 vượt trội k=2 ở mức ý nghĩa 10% (DM) "
-        "và có hiệu quả kinh tế đáng kể (ΔSharpe ≈ +0.22).", BODY))
+        "Phat hien quan trong (sample selection bias): k=6 yeu cau >=8 co phieu nen chi "
+        "chay duoc 75/106 buoc OOS — bo qua 31 buoc kho (it co phieu, bien dong cao). "
+        "Khi so sanh cong bang tren 75 buoc chung: k=4 Sharpe=1.0603 nhinh hon k=6 "
+        "Sharpe=1.0400 (DeltaSharpe=-0.0203, DM p=0.54 — khong co y nghia thong ke). "
+        "k=4 duoc giu lam baseline vi: (1) phu toan bo 106 buoc OOS; "
+        "(2) Sharpe tuong duong k=6 tren cung mau; "
+        "(3) Sharpe 0.9396 (106 buoc) cao hon k=2 (0.7237) voi DeltaSharpe=+0.216 "
+        "la hieu qua kinh te dang ke (Harvey et al. 2016).", BODY))
 
-    # Monthly differential raw data
     s.append(Spacer(1, 0.3*cm))
-    s.append(Paragraph("Dữ liệu monthly d_t = r_k4 − r_k2 (106 bước, dùng cho DM test):", BODY))
+    s.append(Paragraph("Du lieu monthly k=2/k=4/k=6 (75 buoc chung, dung cho DM test):", BODY))
     df_dm_m = load("dm_bootstrap_monthly.csv")
     dm_m = df_dm_m.copy()
     dm_m["Date"] = dm_m["Date"].astype(str).str[:10]
-    for c in ["r_k4","r_k2","rf","d_t","excess_k4","excess_k2"]:
+    for c in ["r_k6","r_k4","r_k2","rf","d_k6_k4","d_k6_k2","d_k4_k2"]:
         if c in dm_m.columns:
-            dm_m[c] = dm_m[c].apply(lambda x: f"{x:+.5f}" if pd.notna(x) else "–")
-    s.append(tbl(dm_m, cw=[3.0*cm]+[2.5*cm]*6, fs=7))
+            dm_m[c] = dm_m[c].apply(lambda x: f"{x:+.5f}" if pd.notna(x) else "-")
+    s.append(tbl(dm_m, cw=[3.0*cm]+[2.3*cm]*7, fs=6.5))
 
     s.append(PageBreak())
 

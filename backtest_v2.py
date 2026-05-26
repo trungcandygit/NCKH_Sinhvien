@@ -94,7 +94,7 @@ class Config:
 
     LOOKBACK    = 36
     TAU         = 1 / 36       # BL prior-uncertainty scalar  (τ = 1/T)
-    N_CLUSTERS  = 4            # k=4 validated by silhouette analysis
+    N_CLUSTERS  = 4            # k=4: best OOS Sharpe on fair comparison (106 steps)
     MAX_WEIGHT  = 0.30
     OPT_STARTS  = 10
     # ── K-means signal parameters ────────────────────────────────────────────
