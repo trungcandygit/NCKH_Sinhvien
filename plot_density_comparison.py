@@ -1,5 +1,5 @@
 """
-Figure: Static (delta=0) vs Monte Carlo multi-delta comparison
+Figure: Static (delta=0, BL_KIO vs TAN) vs Monte Carlo multi-delta (BL_KIO)
 Both panels use identical MATLAB-style KDE formatting.
 """
 
@@ -37,34 +37,34 @@ deltas = sorted(df["Delta_Noise"].unique())
 N_KDE  = 600
 MARK_N = 70
 
-CONFIGS = {
-    -0.10: dict(ls="-",  marker="^", lw=1.2, ms=4.5, label=r"$\delta\!=\!-10\%$"),
-    -0.05: dict(ls="--", marker="o", lw=1.2, ms=4.5, label=r"$\delta\!=\!-5\%$"),
-     0.00: dict(ls="-",  marker="s", lw=1.6, ms=5.0, label=r"$\delta\!=\!0$"),
-     0.05: dict(ls="--", marker="D", lw=1.2, ms=4.0, label=r"$\delta\!=\!+5\%$"),
-     0.10: dict(ls="-",  marker="*", lw=1.2, ms=6.0, label=r"$\delta\!=\!+10\%$"),
+# Configs cho panel (b) — 5 delta BL_KIO
+MC_CONFIGS = {
+    -0.10: dict(ls="-",  marker="^", lw=1.2, ms=4.5, label=r"BL-KIO  $\delta\!=\!-10\%$"),
+    -0.05: dict(ls="--", marker="o", lw=1.2, ms=4.5, label=r"BL-KIO  $\delta\!=\!-5\%$"),
+     0.00: dict(ls="-",  marker="s", lw=1.6, ms=5.0, label=r"BL-KIO  $\delta\!=\!0$"),
+     0.05: dict(ls="--", marker="D", lw=1.2, ms=4.0, label=r"BL-KIO  $\delta\!=\!+5\%$"),
+     0.10: dict(ls="-",  marker="*", lw=1.2, ms=6.0, label=r"BL-KIO  $\delta\!=\!+10\%$"),
 }
-COLORS = {
-    -0.10: "black",
-    -0.05: "black",
-     0.00: "black",
-     0.05: "dimgray",
-     0.10: "dimgray",
+MC_COLORS = {-0.10:"black", -0.05:"black", 0.00:"black", 0.05:"dimgray", 0.10:"dimgray"}
+
+# Configs cho panel (a) — BL_KIO vs TAN tại delta=0
+STATIC_CONFIGS = {
+    "BL_KIO": dict(ls="-",  marker="s", lw=1.6, ms=5.0,
+                   color="black",   label=r"BL-KIO  ($\delta\!=\!0$)"),
+    "TAN":    dict(ls="--", marker="o", lw=1.2, ms=4.5,
+                   color="dimgray", label=r"TAN  ($\delta\!=\!0$)"),
 }
 
-fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.2))
-fig.subplots_adjust(wspace=0.38, top=0.82)
 
-
-def plot_kde_curve(ax, values, cfg, col_c):
+def draw_kde(ax, values, cfg, color):
     kde = gaussian_kde(values, bw_method=0.28)
     x   = np.linspace(values.min() - 0.15, values.max() + 0.15, N_KDE)
     y   = kde(x)
-    ax.plot(x, y, color=col_c, linestyle=cfg["ls"], linewidth=cfg["lw"],
+    ax.plot(x, y, color=color, linestyle=cfg["ls"], linewidth=cfg["lw"],
             zorder=3, label="_nolegend_")
     idx = np.round(np.linspace(15, N_KDE - 15, MARK_N)).astype(int)
     ax.plot(x[idx], y[idx],
-            color=col_c, marker=cfg["marker"],
+            color=color, marker=cfg["marker"],
             markersize=cfg["ms"], linestyle="None",
             markerfacecolor="white", markeredgewidth=1.2,
             zorder=4, label=cfg["label"])
@@ -83,35 +83,39 @@ def finish_ax(ax, xlabel, title):
               handletextpad=0.5, borderpad=0.6)
 
 
-# ── Panel (a): chỉ delta = 0 ────────────────────────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.2))
+fig.subplots_adjust(wspace=0.38, top=0.82)
+
+# ── Panel (a): BL_KIO & TAN tại delta = 0 (kỳ vọng tĩnh) ─────────────────
 ax = axes[0]
 ax.grid(True, zorder=0)
 
-sub0 = df[df["Delta_Noise"] == 0.0]["Sharpe_BL_KIO"].dropna().values
-plot_kde_curve(ax, sub0, CONFIGS[0.00], COLORS[0.00])
+d0 = df[df["Delta_Noise"] == 0.0]
+for col, cfg_key in [("Sharpe_BL_KIO", "BL_KIO"), ("Sharpe_TAN", "TAN")]:
+    vals = d0[col].dropna().values
+    cfg  = STATIC_CONFIGS[cfg_key]
+    draw_kde(ax, vals, cfg, cfg["color"])
 
 finish_ax(ax,
-    xlabel="Tỷ lệ Sharpe (năm hoá) — BL-KIO",
-    title="Approximate density — fixed signal (δ = 0)")
+    xlabel="Tỷ lệ Sharpe (năm hoá)",
+    title="Approximate density — fixed signal (δ = 0)\n(BL-KIO vs TAN)")
 
-
-# ── Panel (b): Monte Carlo 5 mức delta ──────────────────────────────────────
+# ── Panel (b): BL_KIO Monte Carlo 5 mức delta ─────────────────────────────
 ax = axes[1]
 ax.grid(True, zorder=0)
 
 for delta in deltas:
     d   = round(float(delta), 2)
     sub = df[df["Delta_Noise"] == delta]["Sharpe_BL_KIO"].dropna().values
-    plot_kde_curve(ax, sub, CONFIGS[d], COLORS[d])
+    draw_kde(ax, sub, MC_CONFIGS[d], MC_COLORS[d])
 
 finish_ax(ax,
     xlabel="Tỷ lệ Sharpe (năm hoá) — BL-KIO",
-    title="Approximate density — Monte Carlo signal noise δ")
-
+    title="Approximate density — Monte Carlo (5 mức δ)\n(BL-KIO)")
 
 fig.suptitle(
-    "Hình X.  Phân phối Tỷ lệ Sharpe: kỳ vọng tĩnh (δ = 0) vs Monte Carlo đa mức δ\n"
-    "(B = 2.000 lần lặp, 5 mức δ ∈ {−10%, −5%, 0, +5%, +10%})",
+    "Hình X.  Phân phối Tỷ lệ Sharpe: kỳ vọng tín hiệu tĩnh vs Monte Carlo đa mức δ\n"
+    "(B = 2.000 lần lặp, δ ∈ {−10%, −5%, 0, +5%, +10%})",
     fontsize=9.5, y=0.98
 )
 
