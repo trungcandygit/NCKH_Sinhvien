@@ -913,25 +913,25 @@ class Backtester:
             df_ic.to_csv(f"{out}/signal_ic_analysis.csv", index=False)
 
         # ── 13. subperiod_analysis.csv ────────────────────────────────────
-        # Split OOS period at midpoint; compute full metrics for each half.
-        # Tests whether BL outperforms EW in both sub-periods (robustness).
-        oos_dates  = df_idx.index
-        mid_date   = oos_dates[len(oos_dates) // 2]
-        sub_rows   = []
+        # Split OOS period at midpoint; all 6 portfolios × 3 periods = 18 rows.
+        oos_dates = df_idx.index
+        mid_date  = oos_dates[len(oos_dates) // 2]
+        sub_rows  = []
         for period_label, mask in [
             ("Full",     slice(None)),
             ("Period_1", oos_dates < mid_date),
             ("Period_2", oos_dates >= mid_date),
         ]:
             if isinstance(mask, slice):
-                sub_bl, sub_ew, sub_rf = df_idx["BL"], df_idx["EW"], rf_s
+                sub_rf = rf_s
+                sub_series = {p: df_idx[p] for p in PORTS}
             else:
-                sub_bl = df_idx.loc[mask, "BL"]
-                sub_ew = df_idx.loc[mask, "EW"]
                 sub_rf = rf_s[mask]
-            if len(sub_bl) < 6:
+                sub_series = {p: df_idx.loc[mask, p] for p in PORTS}
+            if len(sub_rf) < 6:
                 continue
-            for pname, series in [("BL", sub_bl), ("EW", sub_ew)]:
+            for pname in PORTS:
+                series = sub_series[pname]
                 m = self.perf.compute(series, sub_rf, pname)
                 sub_rows.append(dict(
                     Period=period_label,
