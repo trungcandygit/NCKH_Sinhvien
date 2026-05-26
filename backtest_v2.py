@@ -459,22 +459,23 @@ class PortfolioOptimiser:
 
 class MonteCarloEngine:
     """
-    Sensitivity of BL_KIO-portfolio Sharpe to view-specification errors.
-    Exploits the linear structure  μ_BL(q') = base_vec + A_mat @ q'
-    to evaluate all N_MC_SIMS simulations via a single matrix multiply.
+    Sensitivity of BL_KIO and BL_IO portfolio Sharpe to view-specification errors.
 
-    Returns the full array of N simulated Sharpes per delta level so the
-    caller can accumulate distributions across rolling-window steps.
+    BL_KIO noise: q_noisy = q + delta * |q| * N(0,1)   (K-means view noise)
+    BL_IO  noise: Pi_noisy = Pi + delta * |Pi| * N(0,1) (equilibrium view noise)
+
+    Both use the same delta levels and same noise scale for fair comparison.
+    Exploits linear structure μ_BL(q') = base_vec + A_mat @ q' for vectorised BL_KIO.
     """
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
 
-    def run(self, w_BL, w_TAN, mu_hist, Sigma, Sigma_BL,
-            q, A_mat, base_vec, rf_annual: float) -> list:
+    def run(self, w_BL_KIO, w_BL_IO, w_TAN, mu_hist, Sigma, Sigma_BL,
+            Pi, q, A_mat, base_vec, rf_annual: float) -> list:
         """
-        Returns list of (delta_pct, sharpe_BL_arr, sharpe_TAN_scalar) tuples.
-        sharpe_BL_arr has shape (N_MC_SIMS,) — all individual simulation values.
+        Returns list of (delta_pct, sharpe_KIO_arr, sharpe_IO_arr, sharpe_TAN_scalar).
+        sharpe_KIO_arr and sharpe_IO_arr have shape (N_MC_SIMS,).
         sharpe_TAN_scalar is a float (TAN is deterministic given the training data).
         """
         if self.cfg.N_MC_SIMS == 0:
@@ -483,19 +484,40 @@ class MonteCarloEngine:
         rng = np.random.default_rng(self.cfg.RANDOM_SEED)
         N   = self.cfg.N_MC_SIMS
 
-        var_BL     = float(w_BL  @ Sigma_BL @ w_BL)
-        var_TAN    = float(w_TAN @ Sigma    @ w_TAN)
+        var_KIO    = float(w_BL_KIO @ Sigma_BL @ w_BL_KIO)
+        var_IO     = float(w_BL_IO  @ Sigma    @ w_BL_IO)
+        var_TAN    = float(w_TAN    @ Sigma    @ w_TAN)
         sharpe_TAN = (float(w_TAN @ mu_hist) - rf_annual) / np.sqrt(max(var_TAN, 1e-12))
+
+        vol_KIO    = np.sqrt(max(var_KIO, 1e-12))
+        vol_IO     = np.sqrt(max(var_IO,  1e-12))
+        vol_TAN    = np.sqrt(max(var_TAN, 1e-12))
+        ret_TAN    = float(w_TAN @ mu_hist)
 
         results = []
         for delta_pct in self.cfg.MC_DELTAS:
-            noise_std     = max(abs(delta_pct), 0.01) * np.abs(q)        # (K,)
-            noise_mat     = rng.normal(0.0, noise_std, size=(N, len(q))) # (N, K)
-            q_mat         = q + noise_mat                                  # (N, K)
-            mu_BL_mat     = base_vec + (A_mat @ q_mat.T).T               # (N, n)
-            ret_BL_sim    = mu_BL_mat @ w_BL                              # (N,)
-            sharpe_BL_sim = (ret_BL_sim - rf_annual) / np.sqrt(max(var_BL, 1e-12))
-            results.append((delta_pct, sharpe_BL_sim, sharpe_TAN))       # full array
+            std_q  = max(abs(delta_pct), 0.01) * np.abs(q)              # (K,)
+            std_Pi = max(abs(delta_pct), 0.01) * np.abs(Pi)             # (n,)
+
+            # BL_KIO: noise on K-means views q
+            noise_q      = rng.normal(0.0, std_q,  size=(N, len(q)))    # (N, K)
+            q_mat        = q  + noise_q                                   # (N, K)
+            mu_BL_mat    = base_vec + (A_mat @ q_mat.T).T               # (N, n)
+            ret_KIO_sim  = mu_BL_mat @ w_BL_KIO                         # (N,) annualised return
+            sharpe_KIO   = (ret_KIO_sim - rf_annual) / vol_KIO          # (N,)
+
+            # BL_IO: noise on equilibrium Pi
+            noise_Pi     = rng.normal(0.0, std_Pi, size=(N, len(Pi)))   # (N, n)
+            Pi_mat       = Pi + noise_Pi                                  # (N, n)
+            ret_IO_sim   = Pi_mat @ w_BL_IO                              # (N,) annualised return
+            sharpe_IO    = (ret_IO_sim - rf_annual) / vol_IO             # (N,)
+
+            results.append((
+                delta_pct,
+                sharpe_KIO, ret_KIO_sim, vol_KIO,   # BL_KIO: (N,), (N,), scalar
+                sharpe_IO,  ret_IO_sim,  vol_IO,    # BL_IO:  (N,), (N,), scalar
+                sharpe_TAN, ret_TAN,     vol_TAN,   # TAN:    scalar, scalar, scalar
+            ))
         return results
 
 
@@ -722,10 +744,17 @@ class Backtester:
         self._oos      : list = []
         self._clusters : list = []
         self._ic_rows  : list = []   # per-step IC for signal robustness analysis
-        # MC accumulators: delta_pct -> cumulative Sharpe arrays over OOS steps
-        self._mc_bl_sums  : dict = {}   # delta -> np.ndarray(N_MC_SIMS,)
-        self._mc_tan_sums : dict = {}   # delta -> float
-        self._mc_nsteps   : int  = 0
+        # MC accumulators (sum over OOS steps, divide by nsteps at save time)
+        self._mc_kio_sharpe : dict = {}   # delta -> (N,)
+        self._mc_kio_ret    : dict = {}   # delta -> (N,)
+        self._mc_kio_vol    : dict = {}   # delta -> float
+        self._mc_io_sharpe  : dict = {}   # delta -> (N,)
+        self._mc_io_ret     : dict = {}   # delta -> (N,)
+        self._mc_io_vol     : dict = {}   # delta -> float
+        self._mc_tan_sharpe : dict = {}   # delta -> float
+        self._mc_tan_ret    : dict = {}   # delta -> float
+        self._mc_tan_vol    : dict = {}   # delta -> float
+        self._mc_nsteps     : int  = 0
 
     # ── Main rolling loop ────────────────────────────────────────────────
 
@@ -838,15 +867,33 @@ class Backtester:
                 ))
 
             # ── Monte Carlo sensitivity ────────────────────────────────────
-            mc_result = self.mc_eng.run(w_BL_KIO, w_TAN, mu_hist, Sigma,
-                                        Sigma_BL, q, A_mat, base_vec, rf_a_train)
+            mc_result = self.mc_eng.run(w_BL_KIO, w_BL, w_TAN, mu_hist, Sigma,
+                                        Sigma_BL, Pi, q, A_mat, base_vec, rf_a_train)
             if mc_result:
-                for delta_pct, bl_arr, tan_sh in mc_result:
-                    if delta_pct not in self._mc_bl_sums:
-                        self._mc_bl_sums[delta_pct]  = np.zeros(len(bl_arr))
-                        self._mc_tan_sums[delta_pct] = 0.0
-                    self._mc_bl_sums[delta_pct]  += bl_arr
-                    self._mc_tan_sums[delta_pct] += tan_sh
+                for (delta_pct,
+                     kio_sh, kio_ret, kio_vol,
+                     io_sh,  io_ret,  io_vol,
+                     tan_sh, tan_ret, tan_vol) in mc_result:
+                    if delta_pct not in self._mc_kio_sharpe:
+                        N = len(kio_sh)
+                        self._mc_kio_sharpe[delta_pct] = np.zeros(N)
+                        self._mc_kio_ret[delta_pct]    = np.zeros(N)
+                        self._mc_kio_vol[delta_pct]    = 0.0
+                        self._mc_io_sharpe[delta_pct]  = np.zeros(N)
+                        self._mc_io_ret[delta_pct]     = np.zeros(N)
+                        self._mc_io_vol[delta_pct]     = 0.0
+                        self._mc_tan_sharpe[delta_pct] = 0.0
+                        self._mc_tan_ret[delta_pct]    = 0.0
+                        self._mc_tan_vol[delta_pct]    = 0.0
+                    self._mc_kio_sharpe[delta_pct] += kio_sh
+                    self._mc_kio_ret[delta_pct]    += kio_ret
+                    self._mc_kio_vol[delta_pct]    += kio_vol
+                    self._mc_io_sharpe[delta_pct]  += io_sh
+                    self._mc_io_ret[delta_pct]     += io_ret
+                    self._mc_io_vol[delta_pct]     += io_vol
+                    self._mc_tan_sharpe[delta_pct] += tan_sh
+                    self._mc_tan_ret[delta_pct]    += tan_ret
+                    self._mc_tan_vol[delta_pct]    += tan_vol
                 self._mc_nsteps += 1
 
             if self.verbose:
@@ -883,20 +930,37 @@ class Backtester:
         df_c.to_csv(f"{out}/cluster_signals_v2.csv", index=False)
 
         # ── 4. monte_carlo_v2.csv ─────────────────────────────────────────
-        # Full distribution: N_MC_SIMS rows per delta level (averaged over OOS steps).
-        # Columns: Delta_Noise, Sim_ID, Sharpe_BL_KIO, Sharpe_TAN
-        # Shape: len(MC_DELTAS) × N_MC_SIMS rows  (e.g. 5 × 2000 = 10,000)
+        # Columns: Delta_Noise, Sim_ID,
+        #   Sharpe_BL_KIO, Return_BL_KIO, Vol_BL_KIO,
+        #   Sharpe_BL_IO,  Return_BL_IO,  Vol_BL_IO,
+        #   Sharpe_TAN,    Return_TAN,    Vol_TAN
         if self._mc_nsteps > 0:
+            S = self._mc_nsteps
             mc_rows = []
-            for delta in sorted(self._mc_bl_sums.keys()):
-                avg_bl  = self._mc_bl_sums[delta]  / self._mc_nsteps   # (N,)
-                avg_tan = self._mc_tan_sums[delta]  / self._mc_nsteps   # scalar
-                for sim_id, sh in enumerate(avg_bl, start=1):
+            for delta in sorted(self._mc_kio_sharpe.keys()):
+                kio_sh  = self._mc_kio_sharpe[delta] / S
+                kio_ret = self._mc_kio_ret[delta]    / S
+                kio_vol = self._mc_kio_vol[delta]    / S
+                io_sh   = self._mc_io_sharpe[delta]  / S
+                io_ret  = self._mc_io_ret[delta]     / S
+                io_vol  = self._mc_io_vol[delta]     / S
+                tan_sh  = self._mc_tan_sharpe[delta] / S
+                tan_ret = self._mc_tan_ret[delta]    / S
+                tan_vol = self._mc_tan_vol[delta]    / S
+                for sim_id, (sk, rk, si, ri) in enumerate(
+                        zip(kio_sh, kio_ret, io_sh, io_ret), start=1):
                     mc_rows.append({
                         "Delta_Noise":   delta,
                         "Sim_ID":        sim_id,
-                        "Sharpe_BL_KIO": round(float(sh),       6),
-                        "Sharpe_TAN":    round(float(avg_tan),   6),
+                        "Sharpe_BL_KIO": round(float(sk),  6),
+                        "Return_BL_KIO": round(float(rk),  6),
+                        "Vol_BL_KIO":    round(float(kio_vol), 6),
+                        "Sharpe_BL_IO":  round(float(si),  6),
+                        "Return_BL_IO":  round(float(ri),  6),
+                        "Vol_BL_IO":     round(float(io_vol),  6),
+                        "Sharpe_TAN":    round(float(tan_sh),  6),
+                        "Return_TAN":    round(float(tan_ret), 6),
+                        "Vol_TAN":       round(float(tan_vol), 6),
                     })
             df_mc = pd.DataFrame(mc_rows)
             df_mc.to_csv(f"{out}/monte_carlo_v2.csv", index=False)
